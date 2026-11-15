@@ -1,5 +1,13 @@
 # Changelog
 
+## 0.2.6
+- Protocol correction, based on a real purifier-to-cloud capture: the purifier pushes sensor reports (`A1020RM`, about every 60 s) and settings reports (`A1010RM`, on change) by itself, and the cloud only acknowledges each with the matching `SG`. `SG` is an ack, not a poll, and the cloud is otherwise silent (minutes of silence are normal).
+- Fix: with the cloud relay, cloud silence no longer counts as a stalled upstream. Previously 30 s without a cloud frame made the bridge resume local polling alongside the cloud. Now only socket errors, EOF or a stalled writer mean upstream is down.
+- Fix: on every upstream (re)connect the cloud first receives the purifier's original hello (`A1000QM`), then any buffered frames.
+- With upstream up the bridge sends nothing to the purifier except your commands and requested snapshots (no local acks, no initial snapshot). If upstream goes down it acks the purifier's reports itself (like the cloud) immediately, and stops when upstream returns.
+- Without the relay (or while upstream is down) the 10 s poll loop is gone: each purifier hello/report is acknowledged once, plus one initial snapshot on connect. The purifier-offline timeout is now 150 s (it pushes every 60 s).
+- Web UI: `SG` frames are titled "Acknowledged" (e.g. "ack of sensor report"); poll wording removed.
+
 ## 0.2.5
 - Fix: the web UI Cloud and MQTT pills and the Connections card now update immediately when the Coway cloud link or MQTT connection changes (new `connections` live message), instead of staying stale until another full refresh.
 - Cloud pill shows a neutral "Cloud: on · waiting for purifier" when forwarding is enabled but no purifier is connected; yellow "Cloud: connecting" is only for an actual connection attempt.

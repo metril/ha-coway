@@ -2,7 +2,7 @@
 
 Integration surface (for relay.py / web.py / mqtt_bridge.py)
 -----------------------------------------------------------
-DeviceHub(allowed_macs=(), poll_interval=10.0, silence_timeout=60.0)
+DeviceHub(allowed_macs=(), silence_timeout=150.0, snapshot_grace=2.0)
   await hub.start(host, port, ssl_context) / await hub.stop();  hub.port (bound port)
   hub.add_state_callback(cb(mac, state))        state = device_state() dict, after every report
   hub.add_online_callback(cb(mac, online, fw))  connected/disconnected; re-fired with fw once known
@@ -16,7 +16,7 @@ DeviceHub(allowed_macs=(), poll_interval=10.0, silence_timeout=60.0)
   await hub.request_snapshot(mac) -> bool       A1012QG
   await hub.send_body(mac, body) -> bool        arbitrary body (framed with learned HDR/MAC)
 Session (one per live purifier connection)
-  .mac .hdr .peer .online .firmware .last_seen .suppress_polls (relay sets True to stop local polls)
+  .mac .hdr .peer .online .firmware .last_seen .relayed (relay sets True while upstream is up: no local acks)
   await .send_body(body) / .send_raw(bytes) (relay forwarding) / .write(pairs) / .close()
 Callbacks may be plain functions or coroutine functions. Legacy TLS (1.0, SECLEVEL=0) is confined
 to this listener.
@@ -40,7 +40,7 @@ from .registers import CODE_CHANNEL
 
 log = logging.getLogger(__name__)
 LIVE_WINDOW = 30.0  # a session with a frame this recent is considered live
-POLLS = ("A1000", "A1010", "A1020")
+ACKED = ("A1000", "A1010", "A1020")  # purifier pushes (QM/RM) the cloud acks with SG
 
 
 CERT_SUBJECT = "/C=KR/ST=Seoul/L=Seoul/O=COWAY/OU=SW Dev Unit/CN=Coway_iTrust"
@@ -110,7 +110,7 @@ class Session:
         self.hub, self.writer, self.hdr, self.mac = hub, writer, hdr, mac
         self.peer = writer.get_extra_info("peername")
         self.online = True
-        self.suppress_polls = False
+        self.relayed = False  # upstream cloud is up and acks the purifier itself
         self.last_frame = time.time()
         self._lock = asyncio.Lock()
 
@@ -161,11 +161,14 @@ class DeviceHub:
     def __init__(
         self,
         allowed_macs=(),
-        poll_interval: float = 10.0,
-        silence_timeout: float = 60.0,
+        silence_timeout: float = 150.0,
+        snapshot_grace: float = 2.0,
     ):
         self.allowed = {m.upper() for m in allowed_macs}
-        self.poll_interval, self.silence_timeout = poll_interval, silence_timeout
+        # the purifier pushes a sensor report every ~60 s on its own: 150 s of silence is offline
+        self.silence_timeout = silence_timeout
+        self.snapshot_grace = snapshot_grace  # relay mode: wait this long for upstream first
+        self.relay_mode = False  # set by Relay
         self._sessions: dict[str, Session] = {}
         self._devices: dict[str, dict] = {}
         self._state_cbs: list[Callable] = []
@@ -274,7 +277,7 @@ class DeviceHub:
         task = asyncio.current_task()
         self._tasks.add(task)
         session: Session | None = None
-        poller: asyncio.Task | None = None
+        snap: asyncio.Task | None = None
         buf = b""
         pn = writer.get_extra_info("peername")
         peer_ip = pn[0] if pn else "?"
@@ -366,14 +369,14 @@ class DeviceHub:
                             )
                             await old.close()
                             await self._set_online(mac, True)  # let observers re-attach
-                        poller = asyncio.create_task(self._poll_loop(session))
+                        snap = asyncio.create_task(self._initial_snapshot(session))
                     await self._on_frame(session, raw, frame)
         except (ConnectionError, OSError, ssl.SSLError) as e:
             reason = f"connection error: {e}"
             log.warning("connection error with %s: %s", peer_ip, e)
         finally:
-            if poller:
-                poller.cancel()
+            if snap:
+                snap.cancel()
             writer.close()
             if session:
                 log.info(
@@ -399,6 +402,7 @@ class DeviceHub:
             d["firmware"] = frame.data.lstrip("V")
             log.info("purifier %s firmware %s", s.mac, d["firmware"])
             await self._set_online(s.mac, True)
+            await self._ack(s, frame)
             return
         channel = CODE_CHANNEL.get(frame.code)
         if channel and frame.verb in ("RM", "SM"):
@@ -410,16 +414,24 @@ class DeviceHub:
             d[channel].update(regs)
             for cb in self._state_cbs:
                 await _call(cb, s.mac, self.device_state(s.mac))
+        await self._ack(s, frame)
 
-    async def _poll_loop(self, s: Session) -> None:
+    async def _ack(self, s: Session, frame: codec.Frame) -> None:
+        """Local mode: ack purifier pushes like the cloud does (never while upstream is up)."""
+        if frame.code in ACKED and frame.verb in ("QM", "RM") and not s.relayed:
+            await s.send_body(codec.ack_body(frame.code))
+
+    async def _initial_snapshot(self, s: Session) -> None:
+        """Local mode only: ask for every register once on connect (the cloud does this too)."""
         try:
-            await s.send_body("A1012QG")
-            while s.online:
-                if not s.suppress_polls:
-                    for code in POLLS:
-                        await s.send_body(codec.poll_body(code))
-                await asyncio.sleep(self.poll_interval)
+            if self.relay_mode:  # give upstream a moment: when it is up the cloud owns the session
+                for _ in range(int(self.snapshot_grace / 0.02)):
+                    if s.relayed:
+                        return
+                    await asyncio.sleep(0.02)
+            if s.online and not s.relayed:
+                await s.send_body("A1012QG")
         except asyncio.CancelledError:
             raise
         except Exception:
-            log.exception("poll loop failed")
+            log.exception("initial snapshot failed")

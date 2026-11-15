@@ -238,7 +238,7 @@ details li{margin:4px 0}
           <div class="toolbar">
             <h2 title="Every message exchanged with the purifier, newest at the bottom. Click a row to see all decoded fields and the raw text.">Message log</h2>
             <button type="button" class="fchip" id="f-in" aria-pressed="true" title="Show messages the purifier sent to the bridge (reports, acknowledgements)">From purifier</button>
-            <button type="button" class="fchip" id="f-out" aria-pressed="true" title="Show messages the bridge sent to the purifier (polls, commands)">To purifier</button>
+            <button type="button" class="fchip" id="f-out" aria-pressed="true" title="Show messages the bridge sent to the purifier (acknowledgements, commands)">To purifier</button>
             <button type="button" class="fchip" id="f-cloud" aria-pressed="true" title="Show messages passed between the purifier and Coway's cloud" hidden>Cloud</button>
             <input class="search" id="q" type="search" placeholder="Search  /" aria-label="Search messages" title="Filter by message type, field or raw text. Press / to jump here.">
             <button type="button" class="btn" id="pause" title="Freeze the list so you can read it; new messages are held until you resume">Pause</button>
@@ -249,7 +249,7 @@ details li{margin:4px 0}
           <div class="legend">
             <span><span class="badge in mono">← purifier</span> purifier → bridge</span>
             <span><span class="badge out mono">→ purifier</span> bridge → purifier</span>
-            <span>Polls every 10 s keep the readings fresh.</span>
+            <span>The purifier reports about every 60 s; each report is acknowledged.</span>
           </div>
           <div class="logwrap">
             <div class="log" id="log" role="log" aria-live="off" tabindex="0" aria-label="Message list"></div>

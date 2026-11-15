@@ -1,7 +1,11 @@
 """Optional cloud relay: per purifier session, keep a TLS connection upstream to the Coway cloud.
 
 Purifier frames are forwarded up raw, cloud frames down raw (observer directions "P>C" / "C>P").
-While upstream is up the local poll loop is suppressed. Locally injected A1011QG/A1012QG commands
+While upstream is up the bridge sends nothing locally except user commands: the cloud acks the
+purifier's reports itself (the bridge acks them only while upstream is down). Cloud silence is
+normal (it only speaks to ack pushes and to send commands) and never drops upstream; only socket
+errors, EOF or a stalled writer do. The purifier's A1000QM hello is stored and replayed first on
+every upstream (re)connect. Locally injected A1011QG/A1012QG commands
 are tracked in a FIFO (with cloud-issued ones, in issuance order); only the acks matching a local
 command are swallowed. The session is re-resolved from the hub on every send, so a replaced
 session is picked up. Purifier frames seen before upstream is up are buffered (bounded).
@@ -62,7 +66,6 @@ class Relay:
         stable_after: float = 60.0,
         write_timeout: float = 10.0,
         queue_max: int = 200,
-        cloud_idle: float = 30.0,
     ):
         self.hub = hub
         self.host, self.port = split_host(cloud_host)
@@ -71,8 +74,7 @@ class Relay:
         self.connect_timeout = connect_timeout
         self.stable_after = stable_after
         self.write_timeout, self.queue_max = write_timeout, queue_max
-        self.cloud_idle = cloud_idle  # no cloud frame for this long: upstream is half-up
-        self._idle: set[str] = set()  # macs whose upstream is connected but silent
+        self._hello: dict[str, bytes] = {}  # purifier's raw A1000QM, replayed on each connect
         self._drops: dict[str, int] = {}
         self._q: dict[str, asyncio.Queue] = {}  # bounded purifier->cloud queue (drops oldest)
         self._tasks: dict[str, asyncio.Task] = {}
@@ -84,6 +86,7 @@ class Relay:
         self._ack_cbs: list[Callable] = []
         self._status: dict[str, dict] = {}
         self._cbs: list[Callable] = []
+        hub.relay_mode = True
         hub.add_online_callback(self._on_online)
         hub.add_frame_observer(self._on_frame)
 
@@ -124,6 +127,7 @@ class Relay:
             self._tasks.pop(mac, None)
             self._fifo.pop(mac, None)
             self._buf.pop(mac, None)
+            self._hello.pop(mac, None)
             self._status.pop(mac, None)
 
     def _attach(self, mac: str):
@@ -132,8 +136,8 @@ class Relay:
         if s is not self._sess.get(mac):
             self._sess[mac] = s
             self._fifo.pop(mac, None)
-        if s is not None and mac in self._up and mac not in self._idle:
-            s.suppress_polls = True
+        if s is not None:
+            s.relayed = mac in self._up
         return s
 
     def _fifo_for(self, mac: str) -> deque:
@@ -149,6 +153,8 @@ class Relay:
         if direction != "P>A":
             return
         self._attach(mac)
+        if decoded and decoded.code == "A1000" and decoded.verb == "QM":
+            self._hello[mac] = raw
         if decoded and decoded.verb == "SM" and decoded.code in ACK_CODES:
             fifo = self._fifo_for(mac)
             for i, (origin, code) in enumerate(fifo):
@@ -249,9 +255,6 @@ class Relay:
                     err = repr(e)
                 if time.monotonic() - t0 >= self.stable_after:
                     delay = self.backoff_base  # only a stable upstream resets the backoff
-            s = self.hub.session(mac)
-            if s is not None:
-                s.suppress_polls = False
             self.delays[mac] = delay
             log.warning("upstream for %s down (%s), retry in %.0fs", mac, err, delay)
             remaining = delay
@@ -268,11 +271,15 @@ class Relay:
         q: asyncio.Queue = asyncio.Queue(maxsize=self.queue_max)
         self._q[mac] = q
         self._drops[mac] = 0
-        # frames buffered before upstream was up go first (sync: no interleaving with new frames)
-        for raw in self._buf.pop(mac, ()):
+        # the cloud must see the session's hello first, then frames buffered while upstream was
+        # down (sync: no interleaving with new frames)
+        pending = list(self._buf.pop(mac, ()))
+        hello = self._hello.get(mac)
+        if hello is not None and hello not in pending:
+            pending.insert(0, hello)
+        for raw in pending[-self.queue_max :]:
             q.put_nowait(raw)
         self._up[mac] = writer
-        self._idle.discard(mac)
         self._attach(mac)
         self._set(mac, "up", since=time.time())
         tasks = [
@@ -284,10 +291,9 @@ class Relay:
         finally:
             self._up.pop(mac, None)
             self._q.pop(mac, None)
-            self._idle.discard(mac)
             s = self.hub.session(mac)
             if s is not None:
-                s.suppress_polls = False  # local polling resumes the moment upstream isn't up
+                s.relayed = False  # local acks resume the moment upstream isn't up
             for t in tasks:
                 t.cancel()
             await asyncio.gather(*tasks, return_exceptions=True)
@@ -313,25 +319,9 @@ class Relay:
         buf = b""
         try:
             while True:
-                if not self._live(mac):
-                    return "purifier offline"
-                try:
-                    chunk = await asyncio.wait_for(reader.read(4096), self.cloud_idle)
-                except TimeoutError:
-                    if mac not in self._idle:  # connected but silent: do not starve local polls
-                        log.warning(
-                            "upstream for %s silent for %gs: resuming local polls",
-                            mac,
-                            self.cloud_idle,
-                        )
-                        self._idle.add(mac)
-                        s = self.hub.session(mac)
-                        if s is not None:
-                            s.suppress_polls = False
-                    continue
+                chunk = await reader.read(4096)  # no timeout: cloud silence is normal
                 if not chunk:
                     return "closed by cloud"
-                self._idle.discard(mac)
                 buf += chunk
                 raws, buf = codec.split_frames(buf)
                 for raw in raws:

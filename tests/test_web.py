@@ -12,7 +12,7 @@ from coway_bridge import codec
 @pytest.fixture
 async def env(tmp_path):
     cert, key = ensure_cert(tmp_path)
-    hub = DeviceHub(poll_interval=30, silence_timeout=10)
+    hub = DeviceHub(silence_timeout=10)
     await hub.start("127.0.0.1", 0, build_ssl_context(cert, key))
     web = WebApp(hub, ack_timeout=0.5, ring=50)
     client = TestClient(TestServer(web.app))
@@ -132,7 +132,7 @@ async def test_commands(env):
 
 async def test_ingress_guard(tmp_path, monkeypatch):
     cert, key = ensure_cert(tmp_path)
-    hub = DeviceHub(poll_interval=30)
+    hub = DeviceHub()
     monkeypatch.delenv("SUPERVISOR_TOKEN", raising=False)
     assert WebApp(hub).enforce_ingress is False
     monkeypatch.setenv("SUPERVISOR_TOKEN", "x")
@@ -163,7 +163,7 @@ async def test_cloud_ack_does_not_satisfy_web_wait(tmp_path):
     up = Upstream()
     await up.start(tmp_path)
     cert, key = ensure_cert(tmp_path)
-    hub = DeviceHub(poll_interval=30, silence_timeout=10)
+    hub = DeviceHub(silence_timeout=10)
     await hub.start("127.0.0.1", 0, build_ssl_context(cert, key))
     relay = Relay(hub, f"127.0.0.1:{up.port}", backoff_base=0.1)
     web = WebApp(hub, relay=relay, ack_timeout=3)
@@ -304,8 +304,8 @@ def test_frame_summaries():
         return title, summary, code
 
     assert s("A1000QMV0.0.0.13") == ("Hello", "firmware 0.0.0.13", "A1000")
-    assert s("A1000SG") == ("Keep-alive", "still there?", "A1000")
-    assert s("A1010SG") == ("Poll settings", "asked for current settings", "A1010")
+    assert s("A1000SG") == ("Acknowledged", "ack of hello", "A1000")
+    assert s("A1010SG") == ("Acknowledged", "ack of settings report", "A1010")
     assert s("A1010RM0003000100010002000000030002") == (
         "Settings report",
         "on · manual · speed 2",
@@ -320,7 +320,7 @@ def test_frame_summaries():
     assert s("A1011SM0000")[:2] == ("Acknowledged", "command accepted")
     assert s("A1012QG") == ("Read all", "asked for every register", "A1012")
     assert s("A1012SM0001000A0001")[:2] == ("All registers", "1 value")
-    assert s("A1020SG")[:2] == ("Poll sensors", "asked for sensor readings")
+    assert s("A1020SG")[:2] == ("Acknowledged", "ack of sensor report")
     assert s("A1020RM0004000200000007037E0011006400120014")[1] == (
         "PM10 0 µg/m³ · 894 lx · pre-filter 0% left · Max2 filter 80% left"
     )

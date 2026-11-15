@@ -191,10 +191,10 @@ def describe(frame: codec.Frame) -> tuple[str, str]:
         if verb == "QM":
             return "Hello", f"firmware {frame.data.lstrip('V')}"
         if verb == "SG":
-            return "Keep-alive", "still there?"
+            return "Acknowledged", "ack of hello"
     if code == "A1010":
         if verb == "SG":
-            return "Poll settings", "asked for current settings"
+            return "Acknowledged", "ack of settings report"
         if verb == "RM":
             return "Settings report", " \u00b7 ".join(_control_words(regs)) or "no changes"
     if code == "A1011":
@@ -210,7 +210,7 @@ def describe(frame: codec.Frame) -> tuple[str, str]:
             return "All registers", f"{n} value{'s' if n != 1 else ''}"
     if code == "A1020":
         if verb == "SG":
-            return "Poll sensors", "asked for sensor readings"
+            return "Acknowledged", "ack of sensor report"
         if verb == "RM":
             return "Sensor report", " \u00b7 ".join(_sensor_words(regs)) or "no data"
     return f"Message {code}", verb

@@ -45,7 +45,7 @@ async def env(tmp_path):
     up = Upstream()
     await up.start(tmp_path)
     cert, key = ensure_cert(tmp_path)
-    hub = DeviceHub(poll_interval=0.1, silence_timeout=10)
+    hub = DeviceHub(silence_timeout=10)
     await hub.start("127.0.0.1", 0, build_ssl_context(cert, key))
     relay = Relay(hub, f"127.0.0.1:{up.port}", backoff_base=0.1, backoff_cap=0.4)
     dirs = []
@@ -66,7 +66,7 @@ async def test_forward_both_ways_and_suppress(env):
     p = await Purifier.connect(hub.port)
     p.send("A1000QMV0.0.0.13")
     await wait_for(lambda: relay.upstream_status(MAC)["state"] == "up")
-    assert hub.session(MAC).suppress_polls
+    assert hub.session(MAC).relayed
     p.send(CTL)
     await wait_for(lambda: any(codec.decode_frame(f).body == CTL for f in up.frames))
     assert codec.decode_frame(up.frames[0]).body == "A1000QMV0.0.0.13"  # buffered, flushed first
@@ -76,8 +76,8 @@ async def test_forward_both_ways_and_suppress(env):
     f = await p.recv_until("A1011QG00010001000C")
     assert f is not None
     assert "P>C" in dirs and "A>P" not in dirs[dirs.index("C>P") :]
-    await asyncio.sleep(0.4)  # polls suppressed: nothing else sent locally
-    assert hub.session(MAC).suppress_polls
+    await asyncio.sleep(0.4)  # no local traffic while upstream is up
+    assert hub.session(MAC).relayed
 
 
 async def test_local_write_ack_swallowed(env):
@@ -102,15 +102,15 @@ async def test_upstream_drop_reverts_and_reconnects(env):
     await wait_for(lambda: relay.upstream_status(MAC)["state"] == "up")
     up.writers[0].close()
     await wait_for(lambda: relay.upstream_status(MAC)["state"] == "down")
-    assert not hub.session(MAC).suppress_polls
+    assert not hub.session(MAC).relayed
     assert relay.upstream_status(MAC)["error"]
     await wait_for(lambda: up.conns == 2 and relay.upstream_status(MAC)["state"] == "up")
-    assert hub.session(MAC).suppress_polls
+    assert hub.session(MAC).relayed
 
 
 async def test_unreachable_upstream_backoff(tmp_path):
     cert, key = ensure_cert(tmp_path)
-    hub = DeviceHub(poll_interval=0.1)
+    hub = DeviceHub()
     await hub.start("127.0.0.1", 0, build_ssl_context(cert, key))
     relay = Relay(hub, "127.0.0.1:1", backoff_base=0.05, backoff_cap=0.2)
     seen = []
@@ -118,7 +118,7 @@ async def test_unreachable_upstream_backoff(tmp_path):
     p = await Purifier.connect(hub.port)
     p.send("A1000QMV0.0.0.13")
     await wait_for(lambda: any(s["state"] == "down" for s in seen))
-    assert not hub.session(MAC).suppress_polls
+    assert not hub.session(MAC).relayed
     await wait_for(lambda: sum(s["state"] == "connecting" for s in seen) >= 3)
     await relay.stop()
     await hub.stop()
@@ -144,7 +144,7 @@ async def test_session_replacement_reattaches(env):
     p2.send("A1000QMV0.0.0.13")
     await wait_for(lambda: hub.session(MAC) is not first)
     new = hub.session(MAC)
-    await wait_for(lambda: new.suppress_polls)
+    await wait_for(lambda: new.relayed)
     assert relay.upstream_status(MAC)["state"] == "up" and up.conns == 1
     up.writers[0].write(codec.make_frame(HDR, MAC, "A1011QG00010001000C"))
     assert await p2.recv_until("A1011QG00010001000C")  # delivered to the new session
@@ -160,7 +160,7 @@ async def test_buffer_before_upstream_and_flush(tmp_path):
     up.server.close()
     await up.server.wait_closed()
     cert, key = ensure_cert(tmp_path)
-    hub = DeviceHub(poll_interval=30, silence_timeout=10)
+    hub = DeviceHub(silence_timeout=10)
     await hub.start("127.0.0.1", 0, build_ssl_context(cert, key))
     relay = Relay(hub, f"127.0.0.1:{port}", backoff_base=0.3, backoff_cap=0.3)
     p = await Purifier.connect(hub.port)
@@ -212,7 +212,7 @@ async def test_backoff_resets_only_after_stable(tmp_path, stable, expect):
     up = Upstream()
     await up.start(tmp_path)
     cert, key = ensure_cert(tmp_path)
-    hub = DeviceHub(poll_interval=30, silence_timeout=10)
+    hub = DeviceHub(silence_timeout=10)
     await hub.start("127.0.0.1", 0, build_ssl_context(cert, key))
     relay = Relay(
         hub, f"127.0.0.1:{up.port}", backoff_base=0.1, backoff_cap=0.4, stable_after=stable
@@ -282,7 +282,7 @@ async def _scenario(kind, tmp_path):
 async def test_bad_upstream_never_affects_local(tmp_path, kind):
     host, srv = await _scenario(kind, tmp_path)
     cert, key = ensure_cert(tmp_path)
-    hub = DeviceHub(poll_interval=0.1, silence_timeout=30)
+    hub = DeviceHub(silence_timeout=30)
     await hub.start("127.0.0.1", 0, build_ssl_context(cert, key))
     relay = Relay(
         hub,
@@ -291,7 +291,6 @@ async def test_bad_upstream_never_affects_local(tmp_path, kind):
         backoff_cap=0.2,
         connect_timeout=0.3,
         write_timeout=0.3,
-        cloud_idle=0.3,
     )
     states = []
     hub.add_state_callback(lambda m, s: states.append(s))
@@ -313,7 +312,7 @@ async def test_bad_upstream_never_affects_local(tmp_path, kind):
         assert await asyncio.wait_for(hub.write(MAC, {3: 2}), 1)
         p.send("A1011SM0000")
         assert asyncio.get_running_loop().time() - t0 < 1
-        # local polls (re)start within a short window once upstream is not up
+        # local acks (re)start within a short window once upstream is not up
         seen = []
 
         async def drain():
@@ -323,14 +322,20 @@ async def test_bad_upstream_never_affects_local(tmp_path, kind):
                     return
                 seen.append(f.code)
 
-        d = asyncio.create_task(drain())
-        await wait_for(lambda: seen.count("A1010") >= 3, 3)
+        async def feed():  # the purifier keeps reporting; once upstream is down it gets acks
+            while True:
+                p.send("A1020RM0001000100aa")
+                await asyncio.sleep(0.05)
+
+        d, fd = asyncio.create_task(drain()), asyncio.create_task(feed())
+        if kind != "no_read":  # there the link is up (just not draining): cloud acks, we stay quiet
+            await wait_for(lambda: seen.count("A1020") >= 3, 3)
+        else:
+            await asyncio.sleep(0.3)
         d.cancel()
+        fd.cancel()
         assert hub.session(MAC).online
-        if kind != "drop":
-            assert (
-                relay.upstream_status(MAC)["state"] != "up" or not hub.session(MAC).suppress_polls
-            )
+        assert hub.session(MAC).relayed == (relay.upstream_status(MAC)["state"] == "up")
     finally:
         await relay.stop()
         await hub.stop()
@@ -341,7 +346,7 @@ async def test_bad_upstream_never_affects_local(tmp_path, kind):
 async def test_stalled_writer_drops_oldest_with_warning(tmp_path, caplog):
     host, srv = await _scenario("no_read", tmp_path)
     cert, key = ensure_cert(tmp_path)
-    hub = DeviceHub(poll_interval=30, silence_timeout=30)
+    hub = DeviceHub(silence_timeout=30)
     await hub.start("127.0.0.1", 0, build_ssl_context(cert, key))
     relay = Relay(hub, host, connect_timeout=1, write_timeout=5, queue_max=20)
     p = await Purifier.connect(hub.port)

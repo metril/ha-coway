@@ -59,7 +59,7 @@ class Purifier:
 @pytest.fixture
 async def hub(tmp_path):
     cert, key = ensure_cert(tmp_path)
-    h = DeviceHub(poll_interval=0.2, silence_timeout=5)
+    h = DeviceHub(silence_timeout=5)
     await h.start("127.0.0.1", 0, build_ssl_context(cert, key))
     yield h
     await h.stop()
@@ -148,7 +148,7 @@ async def test_session_flow(hub):
     p.send(CTL)
     p.send(SEN)
     seen = set()
-    for _ in range(12):  # polls repeat every 0.2s
+    for _ in range(8):  # local mode: each push acked once + initial snapshot
         f = await p.recv()
         seen.add(f.body)
         if {"A1000SG", "A1010SG", "A1020SG", "A1012QG"} <= seen:
@@ -172,10 +172,8 @@ async def test_session_flow(hub):
     p.send("A1012SM0001000A0001")
     await wait_for(lambda: hub.device_state(MAC)["snapshot"].get(0xA) == 1)
 
-    # suppress polls
-    hub.session(MAC).suppress_polls = True
-    await asyncio.sleep(0.3)
-    with pytest.raises(TimeoutError):  # drain in-flight polls, then silence
+    # no periodic unsolicited traffic: the bridge only acks pushes
+    with pytest.raises(TimeoutError):
         while True:
             await asyncio.wait_for(p.r.read(4096), 0.5)
 
@@ -203,7 +201,7 @@ async def test_replace_session(hub):
 
 async def test_allowed_macs(tmp_path):
     cert, key = ensure_cert(tmp_path)
-    h = DeviceHub(allowed_macs=["0008DC0000FF"], poll_interval=0.2)
+    h = DeviceHub(allowed_macs=["0008DC0000FF"])
     await h.start("127.0.0.1", 0, build_ssl_context(cert, key))
     try:
         p = await Purifier.connect(h.port)
@@ -216,7 +214,7 @@ async def test_allowed_macs(tmp_path):
 
 async def test_silence_timeout(tmp_path):
     cert, key = ensure_cert(tmp_path)
-    h = DeviceHub(poll_interval=10, silence_timeout=0.3)
+    h = DeviceHub(silence_timeout=0.3)
     await h.start("127.0.0.1", 0, build_ssl_context(cert, key))
     try:
         p = await Purifier.connect(h.port)

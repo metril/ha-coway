@@ -121,7 +121,8 @@ def make_frame(hdr: str, mac: str, body: str) -> bytes:
     return encode_frame(Frame(hdr=hdr, mac=mac, body=body))
 
 
-def poll_body(code: str) -> str:
+def ack_body(code: str) -> str:
+    """Server ack (SG) of a purifier push (QM/RM) with this code."""
     return f"{code}SG"
 
 
