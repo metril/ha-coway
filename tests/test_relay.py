@@ -353,3 +353,42 @@ async def test_stalled_writer_drops_oldest_with_warning(tmp_path, caplog):
     await relay.stop()
     await hub.stop()
     srv.close()
+
+
+async def _next(ws, kind):
+    while True:
+        m = await asyncio.wait_for(ws.receive_json(), 5)
+        if m["t"] == kind:
+            return m
+
+
+async def test_ws_pushes_connections_on_upstream_and_mqtt(env):
+    from aiohttp.test_utils import TestClient, TestServer
+    from coway_bridge.config import Config
+    from coway_bridge.mqtt_bridge import MqttBridge
+    from coway_bridge.web import WebApp
+
+    hub, relay, up, _ = env
+    web = WebApp(hub, Config(mqtt_host="h", mqtt_port=1883, mqtt_tls=False), relay)
+    mq = MqttBridge(hub, web.cfg)
+    web.attach_mqtt(mq)
+    client = TestClient(TestServer(web.app))
+    await client.start_server()
+    try:
+        ws = await client.ws_connect("/api/ws")
+        assert (await ws.receive_json())["t"] == "state"
+        p = await Purifier.connect(hub.port)
+        p.send("A1000QMV0.0.0.13")
+        while True:
+            m = await _next(ws, "connections")
+            if m["data"]["cloud"]["state"] == "on":
+                break
+        mq.connected = True
+        m = await _next(ws, "connections")
+        assert m["data"]["mqtt"]["connected"] is True
+        mq.error = "boom"
+        m = await _next(ws, "connections")
+        assert m["data"]["mqtt"]["error"] == "boom"
+        await ws.close()
+    finally:
+        await client.close()

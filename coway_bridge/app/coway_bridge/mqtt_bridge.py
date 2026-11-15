@@ -299,10 +299,41 @@ class MqttBridge:
         self._logged_discovery: dict[str, tuple] = {}
         self._firmware: dict[str, str | None] = {}
         self.aqi = AqiTracker.for_hub(hub)
-        self.connected = False
-        self.error: str | None = None
+        self._connected = False
+        self._error: str | None = None
+        self._status_cbs: list = []
         hub.add_state_callback(self._on_state)
         hub.add_online_callback(self._on_online)
+
+    def add_status_callback(self, cb) -> None:
+        self._status_cbs.append(cb)
+
+    def _changed(self) -> None:
+        for cb in self._status_cbs:
+            try:
+                cb()
+            except Exception:
+                log.exception("mqtt status callback failed")
+
+    @property
+    def connected(self) -> bool:
+        return self._connected
+
+    @connected.setter
+    def connected(self, v: bool) -> None:
+        old, self._connected = self._connected, v
+        if old != v:
+            self._changed()
+
+    @property
+    def error(self) -> str | None:
+        return self._error
+
+    @error.setter
+    def error(self, v: str | None) -> None:
+        old, self._error = self._error, v
+        if old != v:
+            self._changed()
 
     def status(self) -> dict:
         """Connection status for the web UI (never includes the password)."""

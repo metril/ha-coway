@@ -437,6 +437,14 @@ class WebApp:
 
     def _on_upstream(self, mac: str, status: dict) -> None:
         self._push({"t": "device", "data": self.device(mac)})
+        self.push_connections()
+
+    def push_connections(self) -> None:
+        self._push({"t": "connections", "data": self.connections(self.hub.macs())})
+
+    def attach_mqtt(self, bridge) -> None:
+        self.mqtt = bridge
+        bridge.add_status_callback(self.push_connections)
 
     # --- http --------------------------------------------------------------------
     def _build(self) -> web.Application:

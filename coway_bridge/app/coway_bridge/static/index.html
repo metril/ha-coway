@@ -434,7 +434,8 @@ function renderPills() {
     if (!c.enabled) out.push(pill("", "Cloud: off", off, false));
     else if (c.state === "on") out.push(pill("ok", "Cloud: on", `Coway cloud forwarding is on and connected to ${c.host}.`, false));
     else if (c.state === "error") out.push(pill("crit", "Cloud: error", `Can't reach ${c.host}${c.error ? ` (${c.error})` : ""}. Local control still works.`, false));
-    else out.push(pill("warn", c.state === "idle" ? "Cloud: on" : "Cloud: connecting", `Coway cloud forwarding is on (${c.host}); waiting for ${c.state === "idle" ? "a purifier" : "the link to Coway"}.`, false));
+    else if (c.state === "idle") out.push(pill("", "Cloud: on · waiting for purifier", `Coway cloud forwarding is on (${c.host}); waiting for a purifier to connect.`, false));
+    else out.push(pill("warn", "Cloud: connecting", `Coway cloud forwarding is on (${c.host}); waiting for the link to Coway.`, false));
   }
   $("#pills").innerHTML = out.join("");
   $("#rebar").hidden = S.live;
@@ -759,6 +760,7 @@ function connect() {
   ws.onmessage = (e) => {
     const m = JSON.parse(e.data);
     if (m.t === "state") { applyState(m.data); S.live = true; renderAll(); if (!S.loaded) load(); }
+    else if (m.t === "connections") { S.conns = m.data; renderPills(); renderSelect(); if (S.tab === "diagnostics") renderConns(); }
     else if (m.t === "device") {
       const had = S.devices.has(m.data.mac);
       S.devices.set(m.data.mac, m.data);

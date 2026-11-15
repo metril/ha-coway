@@ -75,7 +75,7 @@ class App:
             await resolve_mqtt(cfg, self.env, self.supervisor_url)
             if cfg.mqtt_source != "none":
                 self.bridge = MqttBridge(self.hub, cfg)
-                self.web.mqtt = self.bridge
+                self.web.attach_mqtt(self.bridge)
         if self.bridge:
             self._mqtt_task = asyncio.create_task(self.bridge.run())
 

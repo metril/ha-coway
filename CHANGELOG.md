@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.2.5
+- Fix: the web UI Cloud and MQTT pills and the Connections card now update immediately when the Coway cloud link or MQTT connection changes (new `connections` live message), instead of staying stale until another full refresh.
+- Cloud pill shows a neutral "Cloud: on · waiting for purifier" when forwarding is enabled but no purifier is connected; yellow "Cloud: connecting" is only for an actual connection attempt.
+
 ## 0.2.4
 - Fix: sensitivity register 000A mapping was reversed. Correct: 1 = sensitive (High), 2 = moderate (Medium), 3 = insensitive (Low). Existing HA automations that set the sensitivity select by name now write the right value.
 - The off timer only works in Bedtime mode: the web UI shows the Off timer row only in Bedtime, and the HA select is renamed "Bedtime timer" and is unavailable unless the purifier is on and in Bedtime mode. Entity keys and unique IDs are unchanged. HA "Sensitivity" is renamed "Smart sensitivity" (settable in any mode).
