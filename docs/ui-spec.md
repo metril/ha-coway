@@ -1,138 +1,126 @@
-# coway-bridge debug UI spec
+# coway-bridge web UI — redesign spec
 
-Single `static/index.html` (inline CSS + JS, no CDN, no build). Served in an HA ingress iframe.
-**All URLs relative** (`api/state`, never `/api/state`); WS URL = `new URL('api/ws', location.href)` with `http`→`ws`.
+Single file `coway_bridge/app/coway_bridge/static/index.html`. Vanilla JS/CSS, no build, no external hosts/fonts/CDNs. Served in an HA ingress iframe: all URLs relative (`api/...`). Replace the current page wholesale.
 
-## Layout
+## 1. Structure
+App bar (sticky, 56px): left = inline fan glyph + "Coway Bridge" (16/500) + device switcher `<select>` (only if >1 device); right = live pill (`Live` green dot / `Reconnecting…` amber pulsing dot) + relay pill (`Relay: on|off|error`). Below: tab bar `Device · Diagnostics · Setup` (`role=tablist`, underline indicator 2px primary, 48px tall). Tab persisted in `location.hash` (`#device`, `#diagnostics`, `#setup`); default `#device`, but default to `#setup` when there are zero devices. Content max-width 1100px, centered, padding 16px (24px ≥900px).
 
-Desktop (≥ 900px): 2-column grid `minmax(320px, 1fr) 2fr`, gap 16px, page padding 16px, max-width 1440px.
-Left column = Status, Actions, Setup (collapsed). Right column = Registers, Frame log (log fills remaining height).
-Mobile (< 900px): single column in order Status, Actions, Registers, Log (fixed 60vh), Setup.
-Device picker appears in the header only when > 1 device; otherwise hidden.
-
-```
-+---------------------------------------------------------------------------+
-| coway-bridge   [Device: 0008DC000001 v]           (*) WS live  Relay: off |
-+--------------------------+------------------------------------------------+
-| STATUS                   | REGISTERS            [filter____] [x] unknown  |
-| (*) Connected            | Reg  Name        Value  Decoded     Updated    |
-| MAC  0008DC000001        | 0001 power       0001   On          12:03:01   |
-| FW   1.0.4               | 0003 fan_mode    0001   Manual      12:03:01   |
-| Last seen 3s ago         | !000E reg_000E   0001   unknown     12:02:51   |
-| Upstream: -- (relay off) |                                                |
-+--------------------------+------------------------------------------------+
-| ACTIONS                  | FRAME LOG  [All|P>A|A>P|C>P|P>C] [search__]    |
-| Power [On][Off]          |   [Pause] [Clear] [Download]  412 / 2000       |
-| Speed [1][2][3]          | 12:03:01.204 P>A  A1010RM ... 3B  power=On ... |
-| Light [On][Off]          | 12:03:01.210 A>P  A1010SM ... 7C  ack          |
-| Raw: reg[____] val[____] |  ...                                           |
-|      [Write]             |                                                |
-| [Request snapshot]       |                                                |
-| status: "Sent, acked"    |                                                |
-+--------------------------+                                                |
-| > SETUP (Wi-Fi)          |                                                |
-+--------------------------+------------------------------------------------+
-```
-
-## Components and states
-
-**Header**: title, device picker (`<select>`), WS indicator (dot + text: "Live" / "Reconnecting…" / "Offline"), relay badge ("Relay: off" / "Relay: up" / "Relay: down").
-- WS down: banner under header, `role="status"`: "Connection to bridge lost. Retrying in Ns." Retry backoff 1,2,4…30s. Data stays visible but dimmed (opacity .6) with "stale" label.
-
-**Status card**: dot + label, MAC, FW, last seen (relative, ticks every 1s, absolute time in `title`), connected since, upstream.
-- Connected: success dot + "Connected". Disconnected (no frame 60s): error dot + "Disconnected – last seen 4 min ago"; actions disabled with inline reason "Purifier offline; commands would be dropped."
-- Relay down (relay on, upstream lost): warning badge + "Upstream down, local polling. Retry in Ns." Purifier status unaffected.
-- No devices yet: Status, Registers, Log replaced by one empty-state card: "No purifier has connected yet." + 3 checks (NAT redirect to HAOS:9090, firewall IoT→HAOS:9090, `allowed_macs`) + "Open Setup" button that expands Setup.
-
-**Registers table**: columns Reg (hex), Name, Raw (hex), Decoded, Updated. Two groups with `<tbody>` headers: Control, Sensors. Filter box (matches reg/name) + "Unknown only" checkbox.
-- Unknown reg (`known:false`): row bg `--warn-bg`, leading "!" glyph, name `reg_XXXX`, Decoded "unknown". Text + glyph, not color only.
-- Value change: Raw cell flashes `--accent-bg` for 1s (disabled under `prefers-reduced-motion`).
-- Empty: "Waiting for first status report…".
-
-**Frame log**: monospace table: time (`HH:MM:SS.mmm`), direction tag, raw (truncated with ellipsis, full on expand), decoded summary. Click/Enter on row toggles an expanded detail (full raw + decoded key/value list + "Copy raw").
-- Direction tags (text label + color + left border): `P→A` purifier→app (blue), `A→P` app→purifier (green), `C→P` cloud→purifier (purple), `P→C` purifier→cloud (orange). Cloud chips are hidden from the filter when relay is off.
-- Controls: direction segmented filter (multi-toggle, `aria-pressed`), text search (raw or decoded, debounced 150ms), Pause/Resume, Clear (clears view only; confirm inline: button becomes "Clear view? Yes / No" for 4s), Download (`GET api/capture`), counter "shown / buffered".
-- Empty: "No frames yet. Frames appear here live." Filtered-empty: "No frames match the filter. [Reset filters]".
-- Paused: button reads "Resume (N new)"; incoming frames buffered client-side (cap 2000, oldest dropped).
-- Auto-scroll: newest at bottom; stick to bottom only if user is within 40px of it, else show "N new frames ↓" pill.
-- High rate: see Performance.
-
-**Actions card**: buttons Power On/Off, Speed 1/2/3, Light On/Off (current state rendered `aria-pressed="true"`), Raw write (reg: 4 hex chars, val: 4 hex chars, `pattern="[0-9A-Fa-f]{4}"`, uppercase on blur, inline error "Use 4 hex digits, e.g. 0001"), "Request snapshot".
-- Pending: clicked button shows spinner + "Sending…", all action buttons `disabled` + `aria-busy`. Timeout 10s.
-- Success: inline status line under card "Power On – acked 12:03:01" (success icon, 4s then fades to muted text, remains as last result).
-- Failure: status line in error color, persistent: "Failed: purifier offline" / "No ack within 10s" / server `error` text. Never use toasts or modals.
-
-**Setup card** (`<details>`, collapsed by default; auto-open when no devices): ordered steps:
-1. Hold the purifier's Wi-Fi button until the Wi-Fi LED blinks (pairing mode).
-2. Join the open Wi-Fi network `Airmega_400s` on a laptop.
-3. Download the CLI: `curl -O https://raw.githubusercontent.com/metril/ha-coway/main/coway_bridge/app/coway_bridge/setup_cli.py`.
-4. Enter your network below and run the generated command on that laptop.
-5. Rejoin your normal Wi-Fi; the purifier should appear here within ~1 min.
-Fields: Serial (label serial; prefilled from the connected unit), SSID. Live-rendered `<pre>`: `python3 setup_cli.py --serial 'SERIAL' --ssid 'My SSID'` (no password; the CLI prompts) + "Copy command". Nothing is sent to the bridge.
-
-## Theming
-
-Tokens on `:root`; dark overrides in `@media (prefers-color-scheme: dark)`. Match HA defaults.
-
-| Token | Light | Dark |
+## 2. Tokens (`:root`, dark overrides in `@media (prefers-color-scheme: dark)`)
+| token | light | dark |
 |---|---|---|
-| `--bg` | `#fafafa` | `#111111` |
-| `--card` | `#ffffff` | `#1c1c1c` |
-| `--text` | `#212121` | `#e1e1e1` |
-| `--muted` | `#5f6368` (6.2:1) | `#9b9b9b` (6.6:1) |
-| `--border` | `#e0e0e0` | `#2f2f2f` |
-| `--accent` | `#03a9f4` bg / `#0277bd` text | `#4fc3f7` |
-| `--ok` / `--warn` / `--err` | `#2e7d32` / `#b26a00` / `#c62828` | `#66bb6a` / `#ffb74d` / `#ef5350` |
-| `--warn-bg` / `--accent-bg` | `#fff4e0` / `#e1f5fe` | `#3a2a10` / `#0d2a3a` |
-| `--dir-pa` `--dir-ap` `--dir-cp` `--dir-pc` | `#1565c0` `#2e7d32` `#6a1b9a` `#b45309` | `#64b5f6` `#81c784` `#ce93d8` `#ffb74d` |
+| --bg | #f4f6f8 | #111315 |
+| --card | #ffffff | #1c1f22 |
+| --card-2 (inset/tile) | #f1f3f5 | #25292d |
+| --text | #1c1f22 | #e6e8ea |
+| --muted | #5f6870 (5.6:1 on card) | #9aa3ab (6.9:1) |
+| --line | #e2e6ea | #30353a |
+| --primary | #0288d1 (text/fills on white, 4.6:1) | #18bcf2 |
+| --on-primary | #ffffff | #00222e |
+| --primary-soft | #e1f3fd | #0f3442 |
+| --ok | #2e7d32 | #66bb6a |
+| --warn | #b26a00 | #ffb74d |
+| --crit | #c62828 | #ef5350 |
+| --unk-bg (unknown reg row) | #fff7e0 | #33290f |
+Soft variants for pills: `color-mix(in srgb, var(--ok) 14%, transparent)` (same for warn/crit).
+Radius: --r-card 16px, --r-tile 12px, --r-ctl 10px, --r-pill 999px. Elevation: --e1 `0 1px 2px rgb(0 0 0/.06),0 1px 3px rgb(0 0 0/.08)`; dark --e1 `0 0 0 1px var(--line)`. Spacing scale 4/8/12/16/24/32. Font: `system-ui,-apple-system,"Segoe UI",Roboto,Ubuntu,sans-serif`; mono `ui-monospace,"SF Mono",Menlo,Consolas,monospace`. Type: display 40/48 600 (PM value), title 20/28 500, h2 16/24 500, body 14/20 400, label 12/16 500 uppercase .04em letter-spacing (--muted), mono 12/18. `font-variant-numeric: tabular-nums` on all numbers.
 
-All text colors ≥ 4.5:1 on `--card`. Status always = icon/glyph + word, never dot alone.
-Type: `font: 14px/1.45 system-ui, -apple-system, "Segoe UI", Roboto, sans-serif`; card titles 16px/600 uppercase-off; mono `12.5px ui-monospace, SFMono-Regular, Menlo, Consolas, monospace`; numbers `font-variant-numeric: tabular-nums`.
-Spacing 4px base: 4/8/12/16/24. Cards: radius 12px, padding 16px, 1px `--border`, no shadow. Buttons 36px high desktop, 44px min on `(pointer: coarse)`; radius 8px.
-
-## Accessibility
-
-- Landmarks: `<header>`, `<main>`, each card `<section aria-labelledby>`. Tables use real `<table>`, `<th scope>`.
-- Live regions: connection/relay text `role="status" aria-live="polite"`; action result line `aria-live="polite"`, failures `role="alert"`. Frame log is NOT live (too noisy); the counter is plain text.
-- Keyboard: all controls native buttons/inputs; log rows `tabindex="0"` with Enter/Space to expand, `aria-expanded`. Shortcuts (ignored while typing in inputs): `p` pause/resume, `/` focus log search.
-- Focus: `:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px }`. Never remove outlines. After pending action completes, focus stays on the triggering button.
-- Disabled controls always have adjacent visible reason text. Respect `prefers-reduced-motion`.
-
-## Performance
-
-- WS messages appended to a queue; flush once per `requestAnimationFrame` (batch DOM via `DocumentFragment`).
-- Client keeps up to 2000 frames in an array (matches server ring); DOM renders only the last 500 matching rows; older removed from the top. Filter changes re-render from the array.
-- High rate (> 50 frames/s over 2s): show inline note "High frame rate – showing latest 500" and skip flash animations.
-- Register table updates cells in place keyed by reg (no re-render). Relative times updated by a single 1s timer.
-- Expanded log row decoded detail built lazily on expand.
-
-## API (all paths relative to ingress root)
-
-`GET api/state` → full snapshot, also sent as first WS message:
-```json
-{"bridge":{"version":"0.1.0","relay_enabled":true},
- "devices":[{"mac":"0008DC000001","fw":"1.0.4","online":true,"last_seen":"2026-11-15T12:03:01.204Z",
-   "connected_since":"2026-11-15T11:00:00Z",
-   "upstream":{"state":"up","since":"…","retry_in":null,"error":null},
-   "registers":[{"reg":"0001","name":"power","group":"control","raw":"0001","decoded":"On","known":true,"updated":"…"}]}]}
+## 3. Device tab
+Desktop ≥900px (2-col grid, 16px gap, hero spans left col, tiles right col 2×2):
 ```
-`upstream.state`: `"disabled"|"connecting"|"up"|"down"`.
-
-`GET api/frames?mac=&limit=2000` → `{"frames":[Frame…]}` (backfill on load). `GET api/capture?mac=` → `text/plain` attachment `coway-capture-<mac>-<ts>.txt`, `allframes.txt` format.
-
-`POST api/devices/{mac}/command` body one of:
-```json
-{"type":"power","value":"on"}  {"type":"speed","value":2}  {"type":"light","value":"off"}
-{"type":"raw","reg":"0001","val":"0001"}  {"type":"snapshot"}
++---------------------------------------+  +-----------------+-----------------+
+| Airmega 400S          (o Online)      |  | AIR QUALITY     | LIGHT           |
+| last seen 3s ago · FW 0.0.0.10        |  |  12  µg/m³      |  893 lx         |
+|                                       |  |  [● Good]       |  Bright         |
+|        ( (  ⏻  ) )   <- 96px          |  |  PM10           |                 |
+|           On                          |  +-----------------+-----------------+
+| MODE  [ Smart | Bedtime | Manual ]    |  | PRE-FILTER      | HEPA (MAX2)     |
+| FAN   (fan svg)  [ 1 | 2 | 3 ]        |  |   (ring 100%)   |   (ring 0%)     |
+| LIGHT [toggle]                        |  |   OK            |   ⚠ Replace now |
+| TIMER  (Off)(1h)(2h)(4h)(8h)          |  +-----------------+-----------------+
+| SENSITIVITY (Low)(Medium)(High)       |
+| ✓ Speed set to 2 · acked 16:03:53     |  <- result line (aria-live)
++---------------------------------------+
 ```
-→ `200 {"ok":true,"acked":true,"at":"…"}` | `409 {"ok":false,"error":"Purifier offline"}` | `504 {"ok":false,"error":"No ack within 10s"}` | `400` validation error.
+Mobile <900px: single column; order hero → AQ+Light (2-col tiles, still side by side ≥360px) → filters (2-col). Hero controls full width; chips wrap.
 
-`WS api/ws` server→client messages:
-```json
-{"t":"state","data":{…same as api/state…}}
-{"t":"frame","data":{"id":4812,"mac":"0008DC000001","ts":"2026-11-15T12:03:01.204Z","dir":"P>A",
-  "raw":"\u0002…\u0003","cmd":"A1010RM","summary":"power=On speed=1","fields":{"0001":"0001"}}}
-{"t":"device","data":{…one device object…}}
-{"t":"reg","data":{"mac":"…","reg":"0001","raw":"0001","decoded":"On","known":true,"updated":"…"}}
+### Hero card
+- Header: name `Airmega 400S` (title), status pill: Online (ok dot) / Offline (muted grey dot + text "Offline"). Subline (muted): `Last seen 3s ago · FW x` (relative time ticks every 1s; switch to `hh:mm` after 1h).
+- Power button: 96px circle centered, `aria-pressed`, label below ("On"/"Off"). On: bg --primary, icon --on-primary, outer ring 6px --primary-soft. Off: bg --card-2, icon --muted. Hover: brightness 1.05; active: scale .96; focus: 3px ring --primary offset 3px.
+- Rows (label column 96px desktop / label above control on mobile <480px):
+  - Mode: segmented control (`role=radiogroup`, each `role=radio`), 40px tall, container --card-2 radius --r-ctl, selected segment --card with --e1 and --primary text. Values Smart/Bedtime/Manual.
+  - Fan: 32px inline SVG fan (3 blades) + segmented `1 | 2 | 3`. Fan spins only when power on: duration 2.4s/1.4s/0.8s for speed 1/2/3; static when off or reduced-motion. In Smart/Bedtime the speed segments remain enabled (tapping one switches to Manual — say so in helper text under the row: "Choosing a speed switches to Manual.").
+  - Light: switch (`role=switch`, 52×32 track, 24px thumb), label "Display light".
+  - Timer: chips Off/1h/2h/4h/8h (radiogroup, 36px tall, min 44px hit area via padding). Selected chip: --primary-soft bg, --primary text, check glyph.
+  - Sensitivity: chips Low/Medium/High (map insensitive/moderate/sensitive; `title` shows the device term).
+- When power is Off: all rows below power get `opacity:.5` but stay operable (setting speed powers on — backend already does this; other writes are allowed).
+- Offline: entire control block disabled (`inert` + opacity .5) with an inline notice above it: "Purifier offline — controls unavailable. Last seen 12m ago." Never disable without this text.
+
+### Optimistic commands (all hero controls)
+1. On interaction: apply new value to UI immediately; mark control `aria-busy=true`, show 16px spinner in that row's label; other controls stay usable, but a second click on the *same* control cancels nothing — queue it (latest wins).
+2. POST; on `ok:true`: clear pending; result line `✓ <Label> set to <value> · acked hh:mm:ss` (--ok).
+3. On failure/timeout: revert to last confirmed value, shake row 1×(200ms, translateX ±4px; skipped with reduced motion), result line `✕ <Label> failed: <error>. Reverted.` (--crit) + "Retry" text button.
+4. Incoming WS `reg` updates for a control with a pending command are ignored until it resolves; afterwards the latest reg value wins.
+Result line: one line under hero, `role=status aria-live=polite`, fades after 6s (success only; errors persist until next action).
+
+### Tiles (card, padding 16px, min-height 132px)
+- Air quality: label "AIR QUALITY", value PM10 display size + `µg/m³` (14 muted), band pill (dot + text, never color alone), caption "PM10". Bands (US EPA 24h PM10): 0–54 Good (--ok), 55–154 Moderate (--warn), 155–254 Unhealthy for sensitive groups (--warn, bold), 255+ Unhealthy (--crit). Missing → "—" and pill "No data".
+- Light: value `893 lx`; caption qualitative: <10 Dark, <200 Dim, <1000 Bright, else Very bright.
+- Filter gauges (Pre-filter, HEPA (MAX2)): remaining = 100 − used, clamped 0–100. 72px SVG ring (stroke 8, track --line, arc color by state), % in center (h2). State text below ring always rendered: ≥20 "OK" (--ok), <20 "⚠ Replace soon" (--warn), <5 "⛔ Replace now" (--crit). Ring has `role=img aria-label="HEPA filter 0% remaining, replace now"`.
+
+## 4. Diagnostics tab
+Desktop ≥900px: grid `340px 1fr`; left column stacks Status card, Registers card, Tools card; right column = Frame log card, height `calc(100vh - 140px)` sticky top 120px. Mobile: Status → Tools → Registers (collapsed `<details>`) → Frame log (height 70vh).
 ```
-`dir` ∈ `P>A`, `A>P`, `C>P`, `P>C` (UI renders with arrows). Raw control chars shown as `␂`/`␃`. Client sends nothing except optional `{"t":"ping"}`; server pings every 20s.
++ Status ------------+  + Frame log ------------------------------------------+
+| Connected  ● ok    |  | [P→A][A→P] [search /______] [Pause][Clear][⇩]  117/117|
+| MAC   0008DC000001 |  |-----------------------------------------------------|
+| Serial 00000TST... |  | 16:06:18.024 [P→A] A1020 pm10=0 lux=893 …         ▸ |
+| FW 0.0.0.10 ...    |  | 16:06:18.410 [A→P] A1011 speed=2                  ▸ |
++ Registers ---------+  |   ▾ decoded fields (key/value grid) + raw hex/text  |
+| [filter][unknown]  |  |                                                     |
+| CONTROL            |  |                         [ 12 new frames ↓ ]         |
+| 0001 power 0001 On |  +-----------------------------------------------------+
++ Tools -------------+
+| reg[____] val[____] [Write]   [Request snapshot]
+```
+- Status card: dl grid (label 12 muted / value mono 13): State (pill), MAC (+copy icon button), Serial (+copy), Firmware, Last seen, Connected since, Upstream (relay state, retry_in, error in --crit).
+- Registers: compact table 32px rows, columns Reg (mono) · Name · Raw (mono) · Decoded · Updated (relative). Group subheaders CONTROL / SENSORS (label style, sticky). Unknown regs: --unk-bg row + small `?` badge (`title="Unknown register"`, sr-only "unknown"). Filter input + "Unknown only" switch. Changed value flashes --primary-soft 600ms (none with reduced motion).
+- Frame log: mono 12/18. Row = time (ms) · dir badge (P→A: --primary-soft/--primary; A→P: --card-2/--text, both with text) · cmd (bold) · summary (ellipsis) · chevron. Click/Enter toggles expansion showing `fields` as key/value grid + raw (wrapped, selectable) + "Copy raw". Toolbar: dir toggle buttons (`aria-pressed`), search (`/` focuses, debounced 150ms, matches cmd/summary/raw), Pause/Resume (paused shows "Paused · N held" badge), Clear (two-step: becomes "Confirm clear" for 3s), Download (`api/capture?mac=`), counter `shown / total`. DOM cap 500 rows (drop oldest), memory cap 2000. Auto-stick to bottom when scrolled within 40px of bottom; otherwise show floating "N new frames ↓" pill. Empty: "No frames yet — they appear live as the purifier talks." Filtered-empty: "No frames match." + "Reset filters".
+- Tools card: Raw write (reg + val, 4-hex each, `pattern`, uppercase on input, inline error under field: "4 hex digits, e.g. 0003"), Write button primary; warning text muted: "Writes go straight to the purifier. Unknown registers can misbehave." Snapshot button secondary. Both report via a result line in the card (same format as hero).
+
+## 5. Setup tab
+Single card, max-width 720px, vertical stepper (numbered 28px circles on a 2px --line rail; completed steps not tracked — purely instructional):
+1. **Put the purifier in Wi-Fi setup mode** — "See the purifier's manual or the IoCare app instructions." (No button sequence.)
+2. **Join its setup network** from a laptop — "Connect to the open network the purifier broadcasts (usually named `Airmega…`)."
+3. **Download the setup tool** (Python 3, no dependencies) — code block + Copy:
+   `curl -O https://raw.githubusercontent.com/metril/ha-coway/main/coway_bridge/app/coway_bridge/setup_cli.py`
+4. **Run it** — inputs: Serial (prefilled from selected device if known) and Wi-Fi SSID; code block updates live and is copyable:
+   `python3 setup_cli.py --serial <serial> --ssid "<ssid>"`. Shell-quote SSID (escape `"`, `\`, `$`, `` ` ``). Placeholders shown as `<serial>`/`<ssid>` when empty. Note: "The tool asks for the Wi-Fi password itself — it is never entered here."
+5. **Reconnect** your laptop to normal Wi-Fi. The purifier should appear on the Device tab within ~1 minute.
+Below stepper: "Purifier not showing up?" `<details open>` with the pfSense checklist (see §6).
+Code block: --card-2, radius 8, mono 13, horizontal scroll, Copy button top-right (text "Copy" → "Copied" 1.5s; fallback select-all if clipboard API denied).
+
+## 6. Empty / offline / error states
+- **No devices** (Device + Diagnostics tabs): centered card, fan illustration (64px, static), title "No purifier connected yet", body "The bridge is listening on port 9090. Point the purifier's cloud hostname at Home Assistant:", checklist (static `<ol>`): 1) pfSense → Firewall → NAT → Port Forward on the IoT interface: source = purifier IP, destination = any (not a fixed cloud IP), TCP 9090 → HA IP:9090. (DNS overrides do not work: the purifier also queries 8.8.8.8.) 2) Allow IoT → HA:9090 in the filter rules. 3) Make the purifier reconnect: kill its 9090 state in Diagnostics → States, or deauth it from the Wi-Fi AP. Never unplug it — it loses its Wi-Fi credentials. 4) Check the bridge log for the purifier connect / TLS handshake warnings. Primary button "Wi-Fi setup →" (switches to Setup tab). Text: "Not on Wi-Fi yet? Use Setup first."
+- **Offline device**: hero notice (§3) + Status pill Offline; tiles show last values with caption "as of hh:mm" muted.
+- **WS disconnected**: app-bar pill "Reconnecting…" (backoff 1→2→4…→30s), plus thin 2px --warn bar under app bar; values remain. On reconnect refetch `api/state` + `api/frames`.
+- **API error on initial load**: full-card error "Can't reach the bridge" + "Retry".
+
+## 7. Motion
+Durations: 120ms (hover/press), 200ms (segment slide, toggle thumb, tab underline), 600ms (value flash). Easing `cubic-bezier(.2,0,0,1)`. Segment selection indicator slides between options. `@media (prefers-reduced-motion: reduce)`: all transitions/animations `none` (fan static, no shake, no flash, spinner replaced by "…").
+
+## 8. Accessibility
+WCAG 2.1 AA. Every interactive ≥44×44 hit area. Visible focus: `:focus-visible { outline: 3px solid var(--primary); outline-offset: 2px }`. Tabs: arrow keys move, Home/End. Radiogroups: roving tabindex + arrow keys. Switch toggles with Space. Status info never color-only (pills/gauges carry text/glyph). Icons have `aria-hidden` with adjacent text, or `aria-label` on icon-only buttons (copy, download). Frame log `role=log aria-live=off`; hero result line `aria-live=polite`; errors `role=alert`. `lang="en"`, logical heading order (h1 app name visually small, h2 cards). Respect 200% zoom at 400px without horizontal page scroll (only log/table/code scroll internally).
+
+## 9. Favicon
+In `<head>`: `<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='8' fill='%2303a9f4'/%3E%3Cpath d='M16 16c0-6 3-9 6-8s1 6-6 8zm0 0c6 0 9 3 8 6s-6 1-8-6zm0 0c0 6-3 9-6 8s-1-6 6-8zm0 0c-6 0-9-3-8-6s6-1 8 6z' fill='white'/%3E%3C/svg%3E">`. Reuse the same fan path for the app-bar glyph and fan SVG.
+
+## 10. Backend additions (web.py)
+Add command types to `WebApp._writes` (reject otherwise with existing 400):
+- `{"type":"mode","value":"smart"|"bedtime"|"manual"}` → smart `{R_MODE:1}`, bedtime `{R_MODE:2}`, manual `{R_SPEED: current speed or 1}`; prepend `R_POWER:1` if off.
+- `{"type":"timer","value":"off"|"1h"|"2h"|"4h"|"8h"}` → `{R_TIMER: inverse(R.TIMER)}`.
+- `{"type":"sensitivity","value":"insensitive"|"moderate"|"sensitive"}` → `{R_SENS: inverse(R.SENSITIVITY)}`.
+Move the preset/timer/sensitivity → writes mapping into a shared helper in `registers.py` (`writes_for(entity, value, control) -> dict|None`) used by both `mqtt_bridge.py` and `web.py`, so behaviour cannot drift. Add tests in `tests/test_web*.py` for each new type (valid + invalid value), xdist-safe.
+UI reads state from `device.registers` by `group`+`name` (control: power/mode/speed/light/timer/sensitivity; sensor: pm10/lux/prefilter_used/hepa_used), parsing `raw` hex for numbers rather than `decoded` strings.
+
+## 11. Acceptance
+Screenshots via Playwright at 1280×800 and 400×860, light and dark, for: Device (online), Device (no devices), Diagnostics, Setup. No console errors, no 404s (favicon), no horizontal page scroll at 400px, Lighthouse a11y ≥ 95.

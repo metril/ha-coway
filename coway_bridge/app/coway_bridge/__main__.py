@@ -9,6 +9,7 @@ import logging
 import logging.handlers
 import os
 import signal
+import threading
 from pathlib import Path
 
 from .config import load_config
@@ -18,6 +19,8 @@ from .server import DeviceHub, build_ssl_context, ensure_cert
 from .web import WebApp, bound_port, start_web
 
 log = logging.getLogger(__name__)
+
+SHUTDOWN_TIMEOUT = 5.0  # hard backstop for the whole shutdown sequence
 
 
 def _frame_logger(data_dir: str):
@@ -80,8 +83,9 @@ class App:
                 await asyncio.wait({self._mqtt_task}, timeout=1)
         if self.relay:
             await bounded(self.relay.stop(), 2)
+        self.web.close_clients()
         if self._runner:
-            await bounded(self._runner.cleanup(), 2)
+            await bounded(self._runner.cleanup(), 3)
         await bounded(self.hub.stop(), 4)
 
 
@@ -102,7 +106,14 @@ async def amain(cfg) -> None:
         if app._mqtt_task and app._mqtt_task.done() and not stop.is_set():
             app._mqtt_task.result()  # surface crash
     finally:
-        await app.stop()
+        # last-resort watchdog: even interpreter/executor teardown cannot keep us alive
+        wd = threading.Timer(SHUTDOWN_TIMEOUT + 3, os._exit, args=(1,))
+        wd.daemon = True
+        wd.start()
+        try:
+            await asyncio.wait_for(app.stop(), SHUTDOWN_TIMEOUT)
+        except TimeoutError:
+            log.error("shutdown exceeded %gs; exiting anyway", SHUTDOWN_TIMEOUT)
 
 
 def main(argv: list[str] | None = None) -> None:

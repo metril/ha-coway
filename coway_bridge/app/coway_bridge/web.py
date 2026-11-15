@@ -292,6 +292,16 @@ class WebApp:
             headers={"Content-Disposition": f'attachment; filename="{name}"'},
         )
 
+    def close_clients(self) -> None:
+        """Wake every WebSocket handler so it closes its socket (called on shutdown)."""
+        for q in list(self._clients):
+            while True:
+                try:
+                    q.put_nowait(None)
+                    break
+                except asyncio.QueueFull:
+                    q.get_nowait()
+
     async def h_ws(self, request: web.Request) -> web.StreamResponse:
         ws = web.WebSocketResponse(heartbeat=20)
         await ws.prepare(request)
@@ -390,9 +400,9 @@ class WebApp:
 
 
 async def start_web(webapp: WebApp, host: str, port: int) -> web.AppRunner:
-    runner = web.AppRunner(webapp.app)
+    runner = web.AppRunner(webapp.app, shutdown_timeout=1.0)
     await runner.setup()
-    await web.TCPSite(runner, host, port).start()
+    await web.TCPSite(runner, host, port, shutdown_timeout=1.0).start()
     return runner
 
 
