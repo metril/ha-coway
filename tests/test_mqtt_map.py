@@ -55,7 +55,7 @@ def test_discovery():
     topics = {t for t, _ in msgs}
     for t in (
         "fan/airmega_400s_0008dc000001/fan",
-        "switch/airmega_400s_0008dc000001/light",
+        "light/airmega_400s_0008dc000001/light",
         "select/airmega_400s_0008dc000001/sensitivity",
         "select/airmega_400s_0008dc000001/timer",
         "sensor/airmega_400s_0008dc000001/pm10",
@@ -401,3 +401,10 @@ def test_mode_dependent_availability():
     assert (a[2]["payload_available"], a[2]["payload_not_available"]) == ("online", "offline")
     fan = msgs[f"homeassistant/fan/airmega_400s_{MAC.lower()}/fan/config"]
     assert len(fan["availability"]) == 2
+
+
+def test_light_is_light_platform():
+    msgs = dict(m.discovery_messages(MAC))
+    light = msgs["homeassistant/light/airmega_400s_0008dc000001/light/config"]
+    assert light["state_value_template"] == "{{ value_json.light }}"
+    assert "value_template" not in light

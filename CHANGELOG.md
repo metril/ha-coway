@@ -1,5 +1,8 @@
 # Changelog
 
+## 0.2.7
+- The purifier light is now a Home Assistant `light` entity (was a `switch`). Update any automations that referenced `switch.airmega_400s_light` to the new `light.` entity.
+
 ## 0.2.6
 - Protocol correction, based on a real purifier-to-cloud capture: the purifier pushes sensor reports (`A1020RM`, about every 60 s) and settings reports (`A1010RM`, on change) by itself, and the cloud only acknowledges each with the matching `SG`. `SG` is an ack, not a poll, and the cloud is otherwise silent (minutes of silence are normal).
 - Fix: with the cloud relay, cloud silence no longer counts as a stalled upstream. Previously 30 s without a cloud frame made the bridge resume local polling alongside the cloud. Now only socket errors, EOF or a stalled writer mean upstream is down.

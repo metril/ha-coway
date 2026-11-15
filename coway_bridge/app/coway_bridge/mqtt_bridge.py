@@ -145,11 +145,11 @@ def discovery_messages(
         },
     )
     add(
-        "switch",
+        "light",
         "light",
         {
             "name": "Light",
-            "value_template": "{{ value_json.light }}",
+            "state_value_template": "{{ value_json.light }}",
             "command_topic": f"{t}/light/set",
             "icon": "mdi:lightbulb",
         },
