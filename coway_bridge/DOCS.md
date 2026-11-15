@@ -39,6 +39,8 @@ With the default `mqtt_base_topic` (`<mac>` is the lowercase purifier MAC):
 | `coway_bridge/<mac>/state` | JSON state |
 | `coway_bridge/<mac>/<entity>/set` | Commands (`power`, `percentage`, `preset`, `light`, `sensitivity`, `timer`) |
 
+`select.*_timer` ("Bedtime timer") is available only while the purifier is on and in Bedtime mode; commands sent in another mode are ignored (logged as a warning; the web API answers 409). `select.*_sensitivity` ("Smart sensitivity") can be set in any mode and affects how Smart mode reacts to dust. Register 000A: 1 = sensitive (High), 2 = moderate (Medium), 3 = insensitive (Low).
+
 Discovery configs go to `homeassistant/<platform>/airmega_400s_<mac>/<entity>/config`; unique IDs are `airmega_400s_<mac>_<entity>`.
 
 ## Network (pfSense example)

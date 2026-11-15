@@ -228,3 +228,128 @@ async def test_backoff_resets_only_after_stable(tmp_path, stable, expect):
     await relay.stop()
     await hub.stop()
     await up.stop()
+
+
+# --- isolation: a misbehaving upstream must never affect the purifier path ----------------
+async def _plain_server(handler, rcvbuf=None):
+    import socket
+
+    sock = socket.socket()
+    if rcvbuf:
+        sock.setsockopt(socket.SOL_SOCKET, socket.SO_RCVBUF, rcvbuf)
+    sock.bind(("127.0.0.1", 0))
+    return await asyncio.start_server(handler, sock=sock), sock.getsockname()[1]
+
+
+async def _scenario(kind, tmp_path):
+    """Returns (host:port, cleanup) for a misbehaving upstream."""
+    cert, key = ensure_cert(tmp_path)
+    if kind == "refuse":
+        return "127.0.0.1:1", None
+    if kind == "dns":
+        return "no-such-host.invalid:9090", None
+    if kind == "tls_hang":
+
+        async def h(r, w):
+            await asyncio.sleep(30)
+
+        srv, port = await _plain_server(h)
+        return f"127.0.0.1:{port}", srv
+    ctx = build_ssl_context(cert, key)
+    if kind == "no_read":
+
+        async def h(r, w):
+            w.transport.pause_reading()
+            await asyncio.sleep(30)
+
+        import socket
+
+        sock = socket.socket()
+        sock.setsockopt(socket.SOL_SOCKET, socket.SO_RCVBUF, 4096)
+        sock.bind(("127.0.0.1", 0))
+        srv = await asyncio.start_server(h, sock=sock, ssl=ctx)
+        return f"127.0.0.1:{sock.getsockname()[1]}", srv
+
+    async def h(r, w):  # drop: accept, then close mid-session
+        await asyncio.sleep(0.2)
+        w.close()
+
+    srv = await asyncio.start_server(h, "127.0.0.1", 0, ssl=ctx)
+    return f"127.0.0.1:{srv.sockets[0].getsockname()[1]}", srv
+
+
+@pytest.mark.parametrize("kind", ["refuse", "dns", "tls_hang", "no_read", "drop"])
+async def test_bad_upstream_never_affects_local(tmp_path, kind):
+    host, srv = await _scenario(kind, tmp_path)
+    cert, key = ensure_cert(tmp_path)
+    hub = DeviceHub(poll_interval=0.1, silence_timeout=30)
+    await hub.start("127.0.0.1", 0, build_ssl_context(cert, key))
+    relay = Relay(
+        hub,
+        host,
+        backoff_base=0.1,
+        backoff_cap=0.2,
+        connect_timeout=0.3,
+        write_timeout=0.3,
+        cloud_idle=0.3,
+    )
+    states = []
+    hub.add_state_callback(lambda m, s: states.append(s))
+    p = await Purifier.connect(hub.port)
+    try:
+        p.send("A1000QMV0.0.0.13")
+        await wait_for(lambda: hub.session(MAC) is not None)
+        # flood frames (fills the upstream's buffers in the no_read case), reports must keep flowing
+        flood = b"".join(
+            codec.make_frame(HDR, MAC, f"A1020RM0001{i % 65535:04X}0000") for i in range(4000)
+        )
+        p.w.write(flood)
+        n0 = len(states)
+        t0 = asyncio.get_running_loop().time()
+        await wait_for(lambda: len(states) >= n0 + 100, 1)
+        assert asyncio.get_running_loop().time() - t0 < 1
+        # web/MQTT command is delivered promptly and acked
+        t0 = asyncio.get_running_loop().time()
+        assert await asyncio.wait_for(hub.write(MAC, {3: 2}), 1)
+        p.send("A1011SM0000")
+        assert asyncio.get_running_loop().time() - t0 < 1
+        # local polls (re)start within a short window once upstream is not up
+        seen = []
+
+        async def drain():
+            while True:
+                f = await p.recv(5)
+                if f is None:
+                    return
+                seen.append(f.code)
+
+        d = asyncio.create_task(drain())
+        await wait_for(lambda: seen.count("A1010") >= 3, 3)
+        d.cancel()
+        assert hub.session(MAC).online
+        if kind != "drop":
+            assert (
+                relay.upstream_status(MAC)["state"] != "up" or not hub.session(MAC).suppress_polls
+            )
+    finally:
+        await relay.stop()
+        await hub.stop()
+        if srv:
+            srv.close()
+
+
+async def test_stalled_writer_drops_oldest_with_warning(tmp_path, caplog):
+    host, srv = await _scenario("no_read", tmp_path)
+    cert, key = ensure_cert(tmp_path)
+    hub = DeviceHub(poll_interval=30, silence_timeout=30)
+    await hub.start("127.0.0.1", 0, build_ssl_context(cert, key))
+    relay = Relay(hub, host, connect_timeout=1, write_timeout=5, queue_max=20)
+    p = await Purifier.connect(hub.port)
+    p.send("A1000QMV0.0.0.13")
+    await _up(relay)
+    for i in range(3000):
+        p.send(f"A1020RM0001{i:04X}0000")
+    await wait_for(lambda: any("dropping oldest" in r.message for r in caplog.records), 3)
+    await relay.stop()
+    await hub.stop()
+    srv.close()

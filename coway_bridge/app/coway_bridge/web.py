@@ -84,12 +84,13 @@ REG_LABELS = {
     ("control", R.R_SPEED): ("Fan speed", "Settings register 0003: fan speed 1-3"),
     ("control", R.R_LIGHT): ("Display light", "Settings register 0007: light (0 off, 2 on)"),
     ("control", R.R_TIMER): ("Off timer", "Settings register 0008: timer in minutes (hex)"),
-    ("control", R.R_SENS): ("Sensitivity", "Settings register 000A: 1 low, 2 medium, 3 high"),
+    ("control", R.R_SENS): ("Sensitivity", "Settings register 000A: 1 high, 2 medium, 3 low"),
     ("sensor", R.S_PM10): ("PM10 dust", "Sensor register 0002: PM10 in \u00b5g/m\u00b3"),
     ("sensor", R.S_LUX): ("Light sensor", "Sensor register 0007: ambient light in lux"),
     ("sensor", R.S_PREFILTER): ("Pre-filter used", "Sensor register 0011: % of pre-filter used"),
     ("sensor", R.S_HEPA): ("Max2 filter used", "Sensor register 0012: % of Max2 filter used"),
 }
+CONFLICT = "\0"  # _writes error prefix: valid command, wrong device state (HTTP 409)
 SENS_LABEL = {"insensitive": "Low", "moderate": "Medium", "sensitive": "High"}
 
 
@@ -549,7 +550,10 @@ class WebApp:
         if t == "light" and v in ("on", "off"):
             return t, {R.R_LIGHT: R.LIGHT_ON if v == "on" else R.LIGHT_OFF}, None
         if t in ("mode", "timer", "sensitivity"):
-            w = R.writes_for(t, v, ctl) if isinstance(v, str) else None
+            try:
+                w = R.writes_for(t, v, ctl) if isinstance(v, str) else None
+            except R.CommandRejected as e:
+                return t, None, f"{CONFLICT}{e}"
             return (t, w, None) if w else (t, None, "invalid command")
         if t == "raw":
             reg, val = body.get("reg"), body.get("val")
@@ -573,6 +577,8 @@ class WebApp:
             return web.json_response({"ok": False, "error": "invalid JSON body"}, status=400)
         kind, writes, err = self._writes(mac, body)
         if err:
+            if err.startswith(CONFLICT):
+                return web.json_response({"ok": False, "error": err[len(CONFLICT) :]}, status=409)
             return web.json_response({"ok": False, "error": err}, status=400)
         s = self.hub.session(mac)
         if s is None or not s.online:

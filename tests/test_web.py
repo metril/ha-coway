@@ -212,14 +212,28 @@ async def test_new_command_types(env):
         ({"type": "mode", "value": "smart"}, {2: 1}),
         ({"type": "mode", "value": "bedtime"}, {2: 2}),
         ({"type": "mode", "value": "manual"}, {3: 1}),
-        ({"type": "timer", "value": "off"}, {8: 0}),
-        ({"type": "timer", "value": "4h"}, {8: 240}),
-        ({"type": "sensitivity", "value": "sensitive"}, {0xA: 3}),
     ]:
         sent.clear()
         r = await c.post(url, json=body)
         assert r.status == 200, body
         assert sent == [want], body
+    # mode-dependent commands: allowed only in their mode
+    ctl = hub._dev(MAC)["control"]
+    for mode_reg, body, want in [
+        (2, {"type": "timer", "value": "off"}, {8: 0}),
+        (2, {"type": "timer", "value": "4h"}, {8: 240}),
+        (1, {"type": "sensitivity", "value": "sensitive"}, {0xA: 1}),
+        (0, {"type": "sensitivity", "value": "insensitive"}, {0xA: 3}),
+    ]:
+        ctl.update({1: 1, 2: mode_reg})
+        sent.clear()
+        r = await c.post(url, json=body)
+        assert r.status == 200, body
+        assert sent == [want], body
+    ctl[2] = 1
+    r = await c.post(url, json={"type": "timer", "value": "4h"})
+    assert r.status == 409 and (await r.json())["error"] == "Timer only works in Bedtime mode"
+    assert sent == [want]  # nothing written by the rejected commands
     for bad in [
         {"type": "mode", "value": "turbo"},
         {"type": "mode", "value": 1},
@@ -298,7 +312,7 @@ def test_frame_summaries():
         "A1010",
     )
     assert s("A1010RM00020007000200080000")[1] == "light on · timer off"
-    assert s("A1010RM0001000A0003")[1] == "high sensitivity"
+    assert s("A1010RM0001000A0003")[1] == "low sensitivity"
     assert s("A1010RM0001000E0001")[1] == "1 other value"
     assert s("A1011QG00010003" + "0003")[:2] == ("Command", "set fan speed → 3")
     assert s("A1011QG00020001000100030002")[1] == "turn on, set fan speed → 2"

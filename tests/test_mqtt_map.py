@@ -17,7 +17,7 @@ DEV = {
 def test_derive_state():
     s = m.derive_state(DEV)
     assert s["power"] == "ON" and s["percentage"] == 66 and s["preset"] == "manual"
-    assert (s["light"], s["sensitivity"], s["timer"]) == ("ON", "sensitive", "2h")
+    assert (s["light"], s["sensitivity"], s["timer"]) == ("ON", "insensitive", "2h")
     assert (s["pm10"], s["light_sensor"], s["pre_filter"], s["max2_filter"]) == (5, 894, 70, 0)
     assert not any(k.startswith(("reg_", "sreg_")) for k in s)
     off = m.derive_state({"control": {1: 0, 3: 3, 2: 1}, "sensor": {}})
@@ -36,8 +36,11 @@ def test_commands():
     assert c("preset", "smart", DEV) == {2: 1} and c("preset", "bedtime", DEV) == {2: 2}
     assert c("preset", "manual", DEV) == {3: 2} and c("preset", "bogus", DEV) is None
     assert c("light", "ON", DEV) == {7: 2} and c("light", "OFF", DEV) == {7: 0}
-    assert c("sensitivity", "insensitive", DEV) == {0xA: 1} and c("sensitivity", "x", DEV) is None
-    assert [c("timer", t, DEV)[8] for t in ("off", "1h", "2h", "4h", "8h")] == [
+    smart = {"control": {**DEV["control"], 2: 1}}
+    bed = {"control": {**DEV["control"], 2: 2}}
+    assert c("sensitivity", "insensitive", smart) == {0xA: 3}
+    assert c("sensitivity", "x", smart) is None
+    assert [c("timer", t, bed)[8] for t in ("off", "1h", "2h", "4h", "8h")] == [
         0,
         60,
         120,
@@ -274,8 +277,17 @@ def test_writes_for_shared():
     assert R.writes_for("preset", "manual", off) == {1: 1, 3: 2}
     assert R.writes_for("mode", "manual", {1: 1}) == {3: 1}
     assert R.writes_for("mode", "x", off) is None
-    assert R.writes_for("timer", "8h", off) == {8: 480} and R.writes_for("timer", "9h", off) is None
-    assert R.writes_for("sensitivity", "moderate", off) == {0xA: 2}
+    bed, smart = {1: 1, 2: 2}, {1: 1, 2: 1}
+    assert R.writes_for("timer", "8h", bed) == {8: 480} and R.writes_for("timer", "9h", bed) is None
+    assert R.writes_for("sensitivity", "moderate", smart) == {0xA: 2}
+    assert R.writes_for("sensitivity", "sensitive", bed) == {0xA: 1}
+    assert R.writes_for("sensitivity", "insensitive", {1: 0, 2: 0}) == {0xA: 3}
+    for ent, val, ctl, msg in [
+        ("timer", "8h", smart, "Timer only works in Bedtime mode"),
+        ("timer", "8h", {1: 0, 2: 2}, "Timer only works in Bedtime mode"),
+    ]:
+        with pytest.raises(R.CommandRejected, match=msg):
+            R.writes_for(ent, val, ctl)
     assert R.writes_for("bogus", "x", off) is None
 
 
@@ -370,3 +382,22 @@ async def test_shutdown_only_offlines_connected_devices(fake_mqtt):
     assert not any(
         t == "coway_bridge/aabbccddeeff/online" and p == "offline" for t, p, _ in pub[-2:]
     )
+
+
+def test_mode_dependent_availability():
+    msgs = dict(m.discovery_messages(MAC))
+    base = [{"topic": "coway_bridge/status"}, {"topic": f"coway_bridge/{MAC.lower()}/online"}]
+    sens = msgs[f"homeassistant/select/airmega_400s_{MAC.lower()}/sensitivity/config"]
+    assert sens["name"] == "Smart sensitivity" and sens["availability"] == base
+    assert sens["options"] == ["insensitive", "moderate", "sensitive"]
+    p = msgs[f"homeassistant/select/airmega_400s_{MAC.lower()}/timer/config"]
+    assert p["name"] == "Bedtime timer" and p["availability_mode"] == "all"
+    assert p["unique_id"] == f"airmega_400s_{MAC.lower()}_timer"
+    a = p["availability"]
+    assert a[:2] == base
+    assert a[2]["topic"] == f"coway_bridge/{MAC.lower()}/state"
+    assert "value_json.preset == 'bedtime'" in a[2]["value_template"]
+    assert "value_json.power == 'ON'" in a[2]["value_template"]
+    assert (a[2]["payload_available"], a[2]["payload_not_available"]) == ("online", "offline")
+    fan = msgs[f"homeassistant/fan/airmega_400s_{MAC.lower()}/fan/config"]
+    assert len(fan["availability"]) == 2

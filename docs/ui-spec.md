@@ -51,7 +51,7 @@ Mobile <900px: single column; order hero → AQ+Light (2-col tiles, still side b
   - Fan: 32px inline SVG fan (3 blades) + segmented `1 | 2 | 3`. Fan spins only when power on: duration 2.4s/1.4s/0.8s for speed 1/2/3; static when off or reduced-motion. In Smart/Bedtime the speed segments remain enabled (tapping one switches to Manual — say so in helper text under the row: "Choosing a speed switches to Manual.").
   - Light: switch (`role=switch`, 52×32 track, 24px thumb), label "Display light".
   - Timer: chips Off/1h/2h/4h/8h (radiogroup, 36px tall, min 44px hit area via padding). Selected chip: --primary-soft bg, --primary text, check glyph.
-  - Sensitivity: chips Low/Medium/High (map insensitive/moderate/sensitive; `title` shows the device term).
+  - Sensitivity: chips Low/Medium/High (map insensitive/moderate/sensitive = reg 3/2/1; `title` shows the device term).
 - When power is Off: all rows below power get `opacity:.5` but stay operable (setting speed powers on — backend already does this; other writes are allowed).
 - Offline: entire control block disabled (`inert` + opacity .5) with an inline notice above it: "Purifier offline — controls unavailable. Last seen 12m ago." Never disable without this text.
 

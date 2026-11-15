@@ -74,6 +74,12 @@ main{max-width:1100px;margin:0 auto;padding:24px 16px 48px}
 .rows.off{opacity:.5}
 .row{display:flex;align-items:center;gap:12px;flex-wrap:wrap}
 .help{font-size:12px;color:var(--muted);margin:-8px 0 0 108px}
+.dep{display:grid;grid-template-rows:0fr;opacity:0;margin-top:-12px;transition:grid-template-rows .25s cubic-bezier(.2,0,0,1),opacity .2s,margin-top .25s cubic-bezier(.2,0,0,1)}
+.dep.open{grid-template-rows:1fr;opacity:1;margin-top:0}
+.subin{overflow:hidden;min-height:0}
+.subin>div{margin-left:12px;padding-left:14px;border-left:2px solid var(--line)}
+.subin .row{padding:2px 0}
+.subin .help{margin:2px 0 4px 108px}
 .seg{display:inline-flex;gap:2px;padding:3px;border-radius:10px;background:var(--card2)}
 .seg button{min-width:64px;height:40px;padding:0 14px;border:0;border-radius:8px;background:transparent;color:var(--muted);font-size:14px;font-weight:500;transition:all .2s cubic-bezier(.2,0,0,1)}
 .seg button[aria-checked=true]{background:var(--card);color:var(--primary);box-shadow:var(--e1)}
@@ -132,15 +138,18 @@ main{max-width:1100px;margin:0 auto;padding:24px 16px 48px}
 .logwrap{position:relative;flex:1;display:flex;flex-direction:column;min-height:0}
 .log{flex:1;min-height:520px;max-height:640px;overflow:auto;border-radius:12px;background:var(--card2);padding:4px 0}
 .log .empty{padding:24px;text-align:center;color:var(--muted)}
-.lrow{display:flex;align-items:center;gap:12px;padding:6px 12px;font-size:12px;line-height:18px;border-bottom:1px solid var(--line);cursor:pointer;min-width:0}
+.log{--c-time:92px;--c-dir:84px;--c-what:128px;--c-code:52px;--gap:12px;--pad:12px}
+.lrow{display:grid;grid-template-columns:var(--c-time) var(--c-dir) var(--c-what) minmax(0,1fr) var(--c-code) 12px;column-gap:var(--gap);align-items:center;padding:6px var(--pad);font-size:12px;line-height:20px;border-bottom:1px solid var(--line);cursor:pointer;min-width:0}
+.lrow>*{min-width:0;line-height:20px}
 .lrow:hover{background:color-mix(in srgb,var(--text) 5%,transparent)}
-.lrow .t{color:var(--muted)}
-.lrow .what{font-weight:600;width:132px;flex:none}
-.lrow .sum{flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
-.lrow .code{color:var(--muted)}
-.lrow .chev{color:var(--muted);transition:transform .2s}
+.lrow .t{color:var(--muted);white-space:nowrap}
+.lrow .badge{justify-self:center;width:var(--c-dir);text-align:center;padding:0;line-height:18px;box-sizing:border-box}
+.lrow .what{font-weight:600;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.lrow .sum{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.lrow .lcode{color:var(--muted);text-align:right;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.lrow .chev{color:var(--muted);transition:transform .2s;text-align:center}
 .lrow[aria-expanded=true] .chev{transform:rotate(90deg)}
-.ldet{padding:8px 12px 12px 24px;border-bottom:1px solid var(--line);font-size:12px;background:var(--card)}
+.ldet{padding:8px var(--pad) 12px calc(var(--pad) + var(--c-time) + var(--c-dir) + 2*var(--gap));border-bottom:1px solid var(--line);font-size:12px;background:var(--card)}
 .ldet dl{display:grid;grid-template-columns:auto 1fr;gap:2px 12px;margin:0 0 8px}
 .ldet dt{color:var(--muted)}.ldet dd{margin:0}
 .ldet pre{margin:0 0 8px;white-space:pre-wrap;word-break:break-all;user-select:text}
@@ -165,11 +174,12 @@ details li{margin:4px 0}
 .empty-card ol{text-align:left;margin:12px auto 16px;padding-left:20px}
 .empty-card li{margin:6px 0}
 @media (max-width:640px){
-  .help{margin-left:0}
+  .help,.subin .help{margin-left:0}
   .label{width:100%}
-  .lrow{flex-wrap:wrap;row-gap:2px}
-  .lrow .what{width:auto}
-  .lrow .sum{flex:1 1 100%;order:9}
+  .log{--c-time:60px;--c-dir:28px;--c-what:84px;--gap:8px;--pad:8px}
+  .lrow{grid-template-columns:var(--c-time) var(--c-dir) var(--c-what) minmax(0,1fr) 12px}
+  .lrow .lcode,.lrow .bw{display:none}
+  .lrow .t{overflow:hidden;text-overflow:clip}
   .logcard,.hero,.card{padding:16px}
   .big b{font-size:34px}
   .setup{padding:20px}
@@ -314,7 +324,7 @@ function regRaw(d, group, name) {
 }
 const MODES = { 1: "smart", 2: "bedtime" };
 const TIMERS = { 0: "off", 60: "1h", 120: "2h", 240: "4h", 480: "8h" };
-const SENS = { 1: "insensitive", 2: "moderate", 3: "sensitive" };
+const SENS = { 3: "insensitive", 2: "moderate", 1: "sensitive" };
 function confirmed(d) {
   const n = (x) => regRaw(d, "control", x);
   return {
@@ -469,6 +479,8 @@ function renderDevice() {
   const spin = v.mode === "manual" ? { 1: "2.4s", 2: "1.4s", 3: "0.8s" }[v.speed] || "1.8s" : "1.8s";
   const fanOn = v.power;
   const row = (c, label, tip, inner) => `<div class="row${S.busy[c] ? " busy" : ""}" data-row="${c}"${busy(c)}><div class="label" title="${esc(tip)}">${label}</div>${inner}</div>`;
+  const shown = S.subShown || { timer: v.mode === "bedtime" };
+  const sub = (k, open, inner, help) => `<div class="dep${shown[k] ? " open" : ""}" data-sub="${k}"${shown[k] ? "" : " inert"}><div class="subin"><div>${inner}<div class="help">${esc(help)}</div></div></div></div>`;
   const aqiTile = `<section class="card tile" aria-label="Air quality">
     <div class="label" title="AQI is calculated by the bridge from the purifier's PM10 dust sensor (particles up to 10 µm). The purifier itself only reports PM10.">Air quality</div>
     <div class="big" title="Air Quality Index calculated from PM10 using the US EPA scale (0–50 Good, 51–100 Moderate, 101–150 Unhealthy for sensitive groups, 151+ Unhealthy). Smoothed over a few minutes; EPA's official figure uses a 24-hour average."><b>${d.aqi == null ? "—" : d.aqi}</b><span class="sub">AQI</span></div>
@@ -491,16 +503,17 @@ function renderDevice() {
       <div class="rows${v.power === false ? " off" : ""}"${offline ? " inert style=\"opacity:.5\"" : ""}>
         ${row("mode", "Mode", "Smart: the purifier picks the fan speed from air quality. Bedtime: quiet, lowest speed, dim light. Manual: you pick the speed.",
           `<div class="seg" role="radiogroup" aria-label="Mode">${rb("", "mode", "mode", v.mode, [["smart", "Smart"], ["bedtime", "Bedtime"], ["manual", "Manual"]])}</div>`)}
+        ${sub("timer", v.mode === "bedtime", row("timer", "Off timer", "Only works in Bedtime mode. Turns the purifier off automatically after the chosen time. Off = run until turned off.",
+          `<div class="chips" role="radiogroup" aria-label="Off timer">${rb("chip", "timer", "timer", v.timer, [["off", "Off"], ["1h", "1h"], ["2h", "2h"], ["4h", "4h"], ["8h", "8h"]])}</div>`), "Turns the purifier off after the chosen time.")}
         ${row("speed", "Fan", "Fan speed 1 (low) to 3 (high). The fan icon spins faster at higher speeds.",
           `<div style="display:flex;align-items:center;gap:12px;flex-wrap:wrap"><svg class="fan${fanOn ? " on" : ""}" style="--spin:${spin}" width="32" height="32" viewBox="0 0 32 32" aria-hidden="true">${FAN}</svg>
           <div class="seg" role="radiogroup" aria-label="Fan speed">${[1, 2, 3].map((n) => { const on = v.speed === n && v.mode === "manual"; return `<button type="button" role="radio" aria-checked="${on}" tabindex="${on || (v.mode !== "manual" && n === 1) ? 0 : -1}" data-fid="speed-${n}" data-set="speed" data-v="${n}">${n}</button>`; }).join("")}</div></div>`)}
         <div class="help">Choosing a speed switches to Manual.</div>
         ${row("light", "Light", "Turns the purifier's front display and air-quality ring light on or off. Doesn't affect purifying.",
           `<button type="button" role="switch" class="sw" aria-checked="${!!v.light}" aria-label="Display light" data-fid="light" data-act="light"><i></i></button><span>Display light</span>`)}
-        ${row("timer", "Timer", "Turns the purifier off automatically after the chosen time. Off = run until turned off.",
-          `<div class="chips" role="radiogroup" aria-label="Timer">${rb("chip", "timer", "timer", v.timer, [["off", "Off"], ["1h", "1h"], ["2h", "2h"], ["4h", "4h"], ["8h", "8h"]])}</div>`)}
-        ${row("sens", "Sensitivity", "How strongly Smart mode reacts to dust. High = speeds up sooner. (Device terms: insensitive / moderate / sensitive.)",
+        ${row("sens", "Sensitivity", "How strongly Smart mode reacts to dust; High speeds up sooner. (Device terms: insensitive / moderate / sensitive.)",
           `<div class="chips" role="radiogroup" aria-label="Sensitivity">${rb("chip", "sens", "sens", v.sens, [["insensitive", "Low"], ["moderate", "Medium"], ["sensitive", "High"]])}</div>`)}
+        <div class="help">How strongly Smart mode reacts to dust.</div>
       </div>
       <div class="result" id="msg" role="status" aria-live="polite"></div>
     </section>
@@ -510,6 +523,15 @@ function renderDevice() {
       ${filterTile("Max2 filter", px("hepa_used"), "Coway's main filter (True HEPA + activated carbon in one). % remaining until it needs replacing, as reported by the purifier.", asOf)}
     </div></div>`;
   renderMsg();
+  const want = { timer: v.mode === "bedtime" };
+  const apply = () => root.querySelectorAll("[data-sub]").forEach((el) => {
+    const on = want[el.dataset.sub];
+    el.classList.toggle("open", on);
+    el.toggleAttribute("inert", !on);
+  });
+  if (matchMedia("(prefers-reduced-motion: reduce)").matches) apply();
+  else requestAnimationFrame(() => requestAnimationFrame(apply));
+  S.subShown = want;
   if (focus) $(`#p-device [data-fid="${focus}"]`)?.focus();
 }
 function emptyCard() {
@@ -608,7 +630,7 @@ function rowEl(f) {
   el.className = "lrow"; el.tabIndex = 0; el.setAttribute("role", "button"); el.setAttribute("aria-expanded", "false");
   el.dataset.id = f.id;
   el.title = `${who} · code ${f.code || f.cmd} · click to expand`;
-  el.innerHTML = `<span class="mono t">${frameTime(f.ts)}</span><span class="badge mono ${kind}">${esc(label)}</span><span class="what">${esc(f.title || f.cmd)}</span><span class="sum">${esc(f.summary)}</span><span class="mono code" title="Protocol message code">${esc(f.code || "")}</span><span class="chev" aria-hidden="true">›</span>`;
+  el.innerHTML = `<span class="mono t">${frameTime(f.ts)}</span><span class="badge mono ${kind}" title="${esc(who)}">${esc(label.slice(0, 1))}<span class="bw"> ${esc(label.slice(2))}</span></span><span class="what">${esc(f.title || f.cmd)}</span><span class="sum">${esc(f.summary)}</span><span class="mono lcode" title="Protocol message code">${esc(f.code || "")}</span><span class="chev" aria-hidden="true">›</span>`;
   return el;
 }
 function toggleRow(el) {
@@ -619,7 +641,7 @@ function toggleRow(el) {
   const det = document.createElement("div");
   det.className = "ldet";
   const fields = Object.entries(f.fields || {});
-  det.innerHTML = `<dl class="mono">${fields.length ? fields.map(([k, x]) => `<dt>${esc(k)}</dt><dd>${esc(x)}</dd>`).join("") : "<dt>fields</dt><dd>none</dd>"}</dl><pre class="mono">${esc(f.raw)}</pre><button type="button" class="btn small" data-copyraw="${f.id}">Copy raw</button>`;
+  det.innerHTML = `<dl class="mono">${fields.length ? fields.map(([k, x]) => `<dt>${esc(k)}</dt><dd>${esc(x)}</dd>`).join("") : "<dt>fields</dt><dd>none</dd>"}</dl><pre class="mono">${esc(String(f.raw).replace(/\x02/g, "\u2402").replace(/\x03/g, "\u2403"))}</pre><button type="button" class="btn small" data-copyraw="${f.id}">Copy raw</button>`;
   el.after(det);
   el.setAttribute("aria-expanded", "true");
 }

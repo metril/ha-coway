@@ -32,7 +32,7 @@ async def purifier(port: int) -> None:
         3: 2,
         7: 0,
         8: 0,
-        0xA: 1,
+        0xA: 2,
         0xE: 1,
         0x12: 0,
         0x18: 1,

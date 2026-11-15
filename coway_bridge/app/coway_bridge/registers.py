@@ -16,7 +16,7 @@ SENSOR_KNOWN = {S_PM10, S_LUX, S_PREFILTER, S_HEPA}
 LIGHT_ON, LIGHT_OFF = 2, 0
 MODE_NAMES = {1: "smart", 2: "bedtime"}  # anything else -> manual
 PRESETS = ("smart", "bedtime", "manual")
-SENSITIVITY = {1: "insensitive", 2: "moderate", 3: "sensitive"}
+SENSITIVITY = {3: "insensitive", 2: "moderate", 1: "sensitive"}  # 1 = most sensitive (High)
 TIMER = {0: "off", 60: "1h", 120: "2h", 240: "4h", 480: "8h"}
 
 CHANNEL_CONTROL, CHANNEL_SENSOR, CHANNEL_SNAPSHOT = "control", "sensor", "snapshot"
@@ -46,10 +46,15 @@ def decode_sensors(regs: dict[int, int]) -> dict[str, int]:
     return {n: regs[r] for r, n in names.items() if r in regs}
 
 
+class CommandRejected(ValueError):
+    """A valid command refused because the unit is in the wrong mode (or off)."""
+
+
 def writes_for(entity: str, value: str, control: dict[int, int]) -> dict[int, int] | None:
     """Map a mode/timer/sensitivity command to {reg: val}; None if the value is invalid.
 
     Shared by the web UI and the MQTT bridge. `entity` "preset" is an alias of "mode".
+    Raises CommandRejected for a timer outside Bedtime mode (or when off). Sensitivity is settable anytime.
     Mode writes power the unit on when it is off (setting a mode while off has no effect).
     """
     v = value.strip() if isinstance(value, str) else value
@@ -65,6 +70,8 @@ def writes_for(entity: str, value: str, control: dict[int, int]) -> dict[int, in
         return w if control.get(R_POWER) else {R_POWER: 1, **w}
     if entity == "timer":
         inv = {name: reg for reg, name in TIMER.items()}
+        if v in inv and not (control.get(R_POWER) and control.get(R_MODE) == 2):
+            raise CommandRejected("Timer only works in Bedtime mode")
         return {R_TIMER: inv[v]} if v in inv else None
     if entity == "sensitivity":
         inv = {name: reg for reg, name in SENSITIVITY.items()}

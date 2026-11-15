@@ -1,5 +1,12 @@
 # Changelog
 
+## 0.2.4
+- Fix: sensitivity register 000A mapping was reversed. Correct: 1 = sensitive (High), 2 = moderate (Medium), 3 = insensitive (Low). Existing HA automations that set the sensitivity select by name now write the right value.
+- The off timer only works in Bedtime mode: the web UI shows the Off timer row only in Bedtime, and the HA select is renamed "Bedtime timer" and is unavailable unless the purifier is on and in Bedtime mode. Entity keys and unique IDs are unchanged. HA "Sensitivity" is renamed "Smart sensitivity" (settable in any mode).
+- Timer commands in the wrong mode are rejected: web API returns 409 with a message; MQTT logs a warning, ignores the command and republishes state so HA reverts.
+- Fix: a slow, unreachable, hanging or flapping Coway cloud can no longer affect the local bridge. Purifier frames are forwarded upstream through a bounded queue (oldest dropped with a warning) written by a separate task with a write timeout, so a stalled upstream never blocks the purifier session, commands, acks, MQTT or polling. Connect/TLS handshake are time-limited, relay errors never reach the session, and local polling resumes immediately whenever upstream is down, stalled or silent for 30 s.
+- Web UI: Diagnostics message log rows use a fixed-column grid (time, direction, title, summary, code) so columns and vertical alignment stay consistent; compact on narrow screens.
+
 ## 0.2.3
 - Unknown registers (`reg_XXXX` / `sreg_XXXX`) are no longer published to HA; they stay in the web UI register table and message log.
 - New optional `mqtt_base_topic` (default `coway_bridge`, unchanged from 0.2.2).

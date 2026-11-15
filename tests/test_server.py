@@ -242,6 +242,23 @@ async def test_mqtt_bridge_publishes_and_commands(hub):
     assert (await p.recv_until("A1011QG000100030003")).body.endswith("0003")
 
 
+async def test_mqtt_mode_guard_ignores_and_republishes(hub, caplog):
+    b = MqttBridge(hub, Config())
+    p = await Purifier.connect(hub.port)
+    p.send("A1000QMV0.0.0.13")
+    p.send("A1010RM00020001000100020001")  # power on, mode 1 = smart
+    await wait_for(lambda: hub.device_state(MAC)["control"].get(2) == 1)
+    while not b._q.empty():
+        b._q.get_nowait()
+    base = f"coway_bridge/{MAC.lower()}"
+    with caplog.at_level("WARNING"):
+        await b.handle_command(f"{base}/timer/set", "2h")
+    assert "Timer only works in Bedtime mode" in caplog.text
+    assert not b._q.empty() and b._q.get_nowait()[0] == f"{base}/state"
+    await b.handle_command(f"{base}/sensitivity/set", "sensitive")
+    assert (await p.recv_until("A1011QG0001000A0001")).body.endswith("0001")
+
+
 async def _connect_from(port, ip):
     r, w = await asyncio.open_connection("127.0.0.1", port, ssl=client_ctx(), local_addr=(ip, 0))
     p = Purifier(r, w)

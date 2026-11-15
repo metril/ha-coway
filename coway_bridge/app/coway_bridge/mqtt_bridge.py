@@ -154,11 +154,29 @@ def discovery_messages(
             "icon": "mdi:lightbulb",
         },
     )
+
+    def bedtime_only() -> dict:
+        return {
+            "availability": [
+                *common["availability"],
+                {
+                    "topic": f"{t}/state",
+                    "value_template": (
+                        "{{ 'online' if value_json.power == 'ON' "
+                        "and value_json.preset == 'bedtime' else 'offline' }}"
+                    ),
+                    "payload_available": "online",
+                    "payload_not_available": "offline",
+                },
+            ],
+            "availability_mode": "all",
+        }
+
     add(
         "select",
         "sensitivity",
         {
-            "name": "Sensitivity",
+            "name": "Smart sensitivity",
             "value_template": "{{ value_json.sensitivity }}",
             "command_topic": f"{t}/sensitivity/set",
             "options": SENS_OPTIONS,
@@ -169,7 +187,8 @@ def discovery_messages(
         "select",
         "timer",
         {
-            "name": "Timer",
+            **bedtime_only(),
+            "name": "Bedtime timer",
             "value_template": "{{ value_json.timer }}",
             "command_topic": f"{t}/timer/set",
             "options": TIMER_OPTIONS,
@@ -346,7 +365,13 @@ class MqttBridge:
         mac = next((m for m in self.hub.macs() if dev_id(m) == parts[1]), None)
         if mac is None:
             return
-        writes = command_to_writes(parts[2], payload, self.hub.device_state(mac))
+        dev = self.hub.device_state(mac)
+        try:
+            writes = command_to_writes(parts[2], payload, dev)
+        except R.CommandRejected as e:
+            log.warning("ignoring command %s=%r: %s", topic, payload, e)
+            self._put(f"{self.base}/{dev_id(mac)}/state", self._state_json(mac, dev))
+            return
         if not writes:
             log.warning("ignoring command %s=%r", topic, payload)
             return

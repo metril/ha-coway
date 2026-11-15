@@ -60,6 +60,9 @@ class Relay:
         backoff_cap: float = 300.0,
         connect_timeout: float = 10.0,
         stable_after: float = 60.0,
+        write_timeout: float = 10.0,
+        queue_max: int = 200,
+        cloud_idle: float = 30.0,
     ):
         self.hub = hub
         self.host, self.port = split_host(cloud_host)
@@ -67,6 +70,11 @@ class Relay:
         self.backoff_base, self.backoff_cap = backoff_base, backoff_cap
         self.connect_timeout = connect_timeout
         self.stable_after = stable_after
+        self.write_timeout, self.queue_max = write_timeout, queue_max
+        self.cloud_idle = cloud_idle  # no cloud frame for this long: upstream is half-up
+        self._idle: set[str] = set()  # macs whose upstream is connected but silent
+        self._drops: dict[str, int] = {}
+        self._q: dict[str, asyncio.Queue] = {}  # bounded purifier->cloud queue (drops oldest)
         self._tasks: dict[str, asyncio.Task] = {}
         self._up: dict[str, asyncio.StreamWriter] = {}
         self._fifo: dict[str, deque] = {}  # pending write/snapshot commands: (origin, code)
@@ -124,7 +132,7 @@ class Relay:
         if s is not self._sess.get(mac):
             self._sess[mac] = s
             self._fifo.pop(mac, None)
-        if s is not None and mac in self._up:
+        if s is not None and mac in self._up and mac not in self._idle:
             s.suppress_polls = True
         return s
 
@@ -150,16 +158,29 @@ class Relay:
                         self._fire_ack(mac, decoded.code)
                         return
                     break
-        w = self._up.get(mac)
-        if w is None:
-            self._buf.setdefault(mac, deque(maxlen=BUFFER_MAX)).append(raw)
+        if mac not in self._up:
+            buf = self._buf.setdefault(mac, deque(maxlen=BUFFER_MAX))
+            if len(buf) == BUFFER_MAX:
+                log.warning("upstream for %s not up: dropping oldest buffered frame", mac)
+            buf.append(raw)
             return
-        try:
-            w.write(raw)
-            await w.drain()
-        except (ConnectionError, OSError):
+        self._enqueue(mac, raw)  # never awaits upstream: a stalled cloud must not block us
+
+    def _enqueue(self, mac: str, raw: bytes) -> None:
+        q = self._q.get(mac)
+        if q is None:
             return
-        await self.hub.notify_frame(mac, "P>C", raw)
+        if q.full():
+            with contextlib.suppress(asyncio.QueueEmpty):
+                q.get_nowait()
+            self._drops[mac] = n = self._drops.get(mac, 0) + 1
+            if n == 1 or n % 500 == 0:
+                log.warning(
+                    "upstream for %s is slow: queue full, dropping oldest frame (%d dropped)",
+                    mac,
+                    n,
+                )
+        q.put_nowait(raw)
 
     def _fire_ack(self, mac: str, code: str) -> None:
         for cb in self._ack_cbs:
@@ -204,15 +225,28 @@ class Relay:
             try:
                 reader, writer = await asyncio.wait_for(
                     asyncio.open_connection(
-                        self.host, self.port, ssl=self.ctx, server_hostname=self.host
+                        self.host,
+                        self.port,
+                        ssl=self.ctx,
+                        server_hostname=self.host,
+                        ssl_handshake_timeout=self.connect_timeout,
                     ),
                     self.connect_timeout,
                 )
-            except (OSError, ssl.SSLError, TimeoutError) as e:
+            except (OSError, ssl.SSLError, TimeoutError) as e:  # incl. DNS failures
                 err = str(e) or type(e).__name__
+            except Exception as e:  # never let the relay task die or reach the session
+                log.exception("upstream connect for %s failed unexpectedly", mac)
+                err = repr(e)
             else:
                 t0 = time.monotonic()
-                err = await self._pump(mac, reader, writer)
+                try:
+                    err = await self._pump(mac, reader, writer)
+                except asyncio.CancelledError:
+                    raise
+                except Exception as e:
+                    log.exception("upstream relay pump for %s failed", mac)
+                    err = repr(e)
                 if time.monotonic() - t0 >= self.stable_after:
                     delay = self.backoff_base  # only a stable upstream resets the backoff
             s = self.hub.session(mac)
@@ -231,28 +265,73 @@ class Relay:
             delay = min(delay * 2, self.backoff_cap)
 
     async def _pump(self, mac, reader, writer) -> str | None:
-        # flush frames buffered before upstream was up (sync: no interleaving with new frames)
-        buffered = list(self._buf.pop(mac, ()))
-        for raw in buffered:
-            writer.write(raw)
+        q: asyncio.Queue = asyncio.Queue(maxsize=self.queue_max)
+        self._q[mac] = q
+        self._drops[mac] = 0
+        # frames buffered before upstream was up go first (sync: no interleaving with new frames)
+        for raw in self._buf.pop(mac, ()):
+            q.put_nowait(raw)
         self._up[mac] = writer
+        self._idle.discard(mac)
         self._attach(mac)
         self._set(mac, "up", since=time.time())
-        err = None
+        tasks = [
+            asyncio.create_task(self._writer_loop(mac, q, writer)),
+            asyncio.create_task(self._reader_loop(mac, reader)),
+        ]
+        try:
+            await asyncio.wait(tasks, return_when=asyncio.FIRST_COMPLETED)
+        finally:
+            self._up.pop(mac, None)
+            self._q.pop(mac, None)
+            self._idle.discard(mac)
+            s = self.hub.session(mac)
+            if s is not None:
+                s.suppress_polls = False  # local polling resumes the moment upstream isn't up
+            for t in tasks:
+                t.cancel()
+            await asyncio.gather(*tasks, return_exceptions=True)
+            writer.transport.abort()  # never wait on a stalled peer
+        for t in tasks:
+            if t.done() and not t.cancelled() and t.exception() is None and t.result():
+                return t.result()
+        return "upstream closed"
+
+    async def _writer_loop(self, mac: str, q: asyncio.Queue, writer) -> str | None:
+        try:
+            while True:
+                raw = await q.get()
+                writer.write(raw)
+                await asyncio.wait_for(writer.drain(), self.write_timeout)
+                await self.hub.notify_frame(mac, "P>C", raw)
+        except TimeoutError:
+            return f"write timeout after {self.write_timeout:g}s"
+        except (ConnectionError, OSError, ssl.SSLError) as e:
+            return str(e) or type(e).__name__
+
+    async def _reader_loop(self, mac: str, reader) -> str | None:
         buf = b""
         try:
-            if buffered:
-                await writer.drain()
-                for raw in buffered:
-                    await self.hub.notify_frame(mac, "P>C", raw)
             while True:
                 if not self._live(mac):
-                    err = "purifier offline"
-                    break
-                chunk = await reader.read(4096)
+                    return "purifier offline"
+                try:
+                    chunk = await asyncio.wait_for(reader.read(4096), self.cloud_idle)
+                except TimeoutError:
+                    if mac not in self._idle:  # connected but silent: do not starve local polls
+                        log.warning(
+                            "upstream for %s silent for %gs: resuming local polls",
+                            mac,
+                            self.cloud_idle,
+                        )
+                        self._idle.add(mac)
+                        s = self.hub.session(mac)
+                        if s is not None:
+                            s.suppress_polls = False
+                    continue
                 if not chunk:
-                    err = "closed by cloud"
-                    break
+                    return "closed by cloud"
+                self._idle.discard(mac)
                 buf += chunk
                 raws, buf = codec.split_frames(buf)
                 for raw in raws:
@@ -261,10 +340,4 @@ class Relay:
                     if s is not None:
                         await s.send_raw(raw, notify=False)
         except (ConnectionError, OSError, ssl.SSLError) as e:
-            err = str(e) or type(e).__name__
-        finally:
-            self._up.pop(mac, None)
-            writer.close()
-            with contextlib.suppress(Exception):
-                await writer.wait_closed()
-        return err
+            return str(e) or type(e).__name__
