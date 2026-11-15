@@ -137,6 +137,7 @@ def discovery_messages(
         "fan",
         "fan",
         {
+            "icon": "mdi:air-purifier",
             "name": None,  # main entity takes the device name -> fan.airmega_400s
             "state_value_template": "{{ value_json.power }}",
             "command_topic": f"{t}/power/set",
@@ -286,6 +287,7 @@ class MqttBridge:
         self._q: asyncio.Queue = asyncio.Queue(maxsize=1000)
         self._extra: dict[str, set[int]] = {}
         self._stop = asyncio.Event()
+        self.keepalive_interval = 300.0  # re-publish retained availability this often
         self.retry_delay = 5.0  # initial backoff; doubles per failure up to MAX_RETRY_DELAY
         self._pub_refused: set[str] = set()
         self._logged_discovery: dict[str, tuple] = {}
@@ -433,7 +435,17 @@ class MqttBridge:
     async def _publish_offline(self, client) -> None:
         await self._pub(client, f"{self.base}/status", "offline")
         for mac in self.hub.macs():
-            await self._pub(client, f"{self.base}/{dev_id(mac)}/online", "offline")
+            if self.hub.device_state(mac)["online"]:  # only devices connected to this bridge
+                await self._pub(client, f"{self.base}/{dev_id(mac)}/online", "offline")
+
+    async def _heartbeat(self, client) -> None:
+        """Re-publish retained availability so another bridge's LWT/shutdown can't stick."""
+        while True:
+            await asyncio.sleep(self.keepalive_interval)
+            await self._pub(client, f"{self.base}/status", "online")
+            for mac in self.hub.macs():
+                if self.hub.device_state(mac)["online"]:
+                    await self._pub(client, f"{self.base}/{dev_id(mac)}/online", "online")
 
     async def _listen(self, client) -> None:
         async for m in client.messages:
@@ -475,6 +487,7 @@ class MqttBridge:
                         async with asyncio.TaskGroup() as tg:
                             tg.create_task(self._publisher(client))
                             tg.create_task(self._listen(client))
+                            tg.create_task(self._heartbeat(client))
                             tg.create_task(self._wait_stop())
                     except* _Stop:
                         stopping = True

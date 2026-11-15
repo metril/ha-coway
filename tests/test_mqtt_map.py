@@ -333,3 +333,39 @@ async def test_connack_refused_actionable_error(monkeypatch, caplog, rc, text):
     await asyncio.wait_for(task, 3)
     errs = [r.getMessage() for r in caplog.records if r.levelname == "ERROR"]
     assert errs and f"MQTT broker refused the connection: {text}" in errs[0]
+
+
+def test_fan_icon():
+    msgs = {t.split("/")[-2]: p for t, p in m.discovery_messages(MAC)}
+    assert msgs["fan"]["icon"] == "mdi:air-purifier"
+
+
+async def test_periodic_republish_of_availability(fake_mqtt):
+    b = _bridge()
+    b.keepalive_interval = 0.05
+    b.hub._dev("AABBCCDDEEFF")["online"] = False
+    task = asyncio.create_task(b.run())
+    await asyncio.sleep(0.4)
+    b.request_stop()
+    await asyncio.wait_for(task, 3)
+    pub = fake_mqtt.instances[0].published
+    assert sum(p == ("coway_bridge/status", "online", True) for p in pub) >= 3
+    mine = (f"coway_bridge/{MAC.lower()}/online", "online", True)
+    assert sum(p == mine for p in pub) >= 3
+    assert not any(
+        t.startswith("coway_bridge/aabbccddeeff/online") and p == "online" for t, p, _ in pub
+    )
+
+
+async def test_shutdown_only_offlines_connected_devices(fake_mqtt):
+    b = _bridge()
+    b.hub._dev("AABBCCDDEEFF")["online"] = False
+    task = asyncio.create_task(b.run())
+    await asyncio.sleep(0.2)
+    b.request_stop()
+    await asyncio.wait_for(task, 3)
+    pub = fake_mqtt.instances[0].published
+    assert (f"coway_bridge/{MAC.lower()}/online", "offline", True) in pub[-2:]
+    assert not any(
+        t == "coway_bridge/aabbccddeeff/online" and p == "offline" for t, p, _ in pub[-2:]
+    )

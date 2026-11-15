@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.2.2
+- Fan entity gets an air-purifier icon.
+- Availability robustness on shared brokers: retained `status` and per-purifier `online` are re-published every 5 minutes; shutdown marks offline only purifiers connected to this bridge, so one bridge stopping no longer marks another's devices offline.
+
 ## 0.2.1
 - MQTT broker auto-discovery via the HA Supervisor (`mqtt:want`): leave `mqtt_host` empty to use the broker from an installed MQTT app. Explicit options still win.
 - No broker configured: clear error in the log and UI; the purifier server and web UI keep running.
