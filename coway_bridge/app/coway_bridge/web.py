@@ -303,12 +303,13 @@ class WebApp:
         else:
             mqtt = {
                 "enabled": False,
-                "host": c.mqtt_host if c else None,
+                "source": c.mqtt_source if c else "none",
+                "host": c.mqtt_host or None if c else None,
                 "port": c.mqtt_port if c else None,
                 "tls": bool(c.mqtt_tls) if c else False,
                 "username": (c.mqtt_username or None) if c else None,
                 "connected": False,
-                "error": None,
+                "error": (c.mqtt_error or None) if c else None,
             }
         if self.relay is None:
             cloud = {

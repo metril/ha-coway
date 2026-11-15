@@ -14,6 +14,7 @@ from pathlib import Path
 
 from .config import load_config
 from .mqtt_bridge import MqttBridge
+from .mqtt_discovery import resolve_mqtt
 from .relay import Relay
 from .server import DeviceHub, build_ssl_context, ensure_cert
 from .web import WebApp, bound_port, start_web
@@ -41,15 +42,22 @@ def _frame_logger(data_dir: str):
 
 class App:
     def __init__(
-        self, cfg, mqtt: bool = True, web_host: str = "0.0.0.0", listen_port: int | None = None
+        self,
+        cfg,
+        mqtt: bool = True,
+        web_host: str = "0.0.0.0",
+        listen_port: int | None = None,
+        supervisor_url: str = "http://supervisor",
+        env: dict | None = None,
     ):
         self.cfg, self.use_mqtt, self.web_host = cfg, mqtt, web_host
         self.listen_port = listen_port if listen_port is not None else cfg.listen_port
         self.hub = DeviceHub(cfg.allowed_macs)
         self.relay = Relay(self.hub, cfg.cloud_host) if cfg.cloud_relay else None
         self.web = WebApp(self.hub, cfg, self.relay)  # first: registers the shared AQI sampler
-        self.bridge = MqttBridge(self.hub, cfg) if mqtt else None
-        self.web.mqtt = self.bridge
+        self.supervisor_url = supervisor_url
+        self.env = os.environ if env is None else env
+        self.bridge = None
         self._runner = None
         self._mqtt_task: asyncio.Task | None = None
         self.web_port: int | None = None
@@ -63,6 +71,11 @@ class App:
         await self.hub.start(cfg.listen_host, self.listen_port, build_ssl_context(cert, key))
         self._runner = await start_web(self.web, self.web_host, cfg.ingress_port)
         self.web_port = bound_port(self._runner)
+        if self.use_mqtt:
+            await resolve_mqtt(cfg, self.env, self.supervisor_url)
+            if cfg.mqtt_source != "none":
+                self.bridge = MqttBridge(self.hub, cfg)
+                self.web.mqtt = self.bridge
         if self.bridge:
             self._mqtt_task = asyncio.create_task(self.bridge.run())
 

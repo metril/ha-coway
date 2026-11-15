@@ -1,5 +1,5 @@
 name: Coway Bridge
-version: "0.2.0"
+version: "0.2.1"
 slug: coway_bridge
 description: Local control of Coway Airmega 400S (AP-2015E) purifiers via MQTT discovery
 url: https://github.com/metril/ha-coway
@@ -7,6 +7,8 @@ arch:
   - amd64
   - aarch64
 image: ghcr.io/metril/{arch}-coway-bridge
+services:
+  - "mqtt:want"
 init: false
 startup: application
 boot: auto
@@ -19,21 +21,17 @@ ports:
 ports_description:
   9090/tcp: Purifier connection (redirect the purifier's cloud traffic here)
 options:
-  mqtt_port: 1883
-  mqtt_username: ""
-  mqtt_password: ""
-  mqtt_tls: false
   allowed_macs: []
   cloud_relay: false
   cloud_host: iocgwo.coway.co.kr:9090
   log_frames_to_file: false
   log_level: info
 schema:
-  mqtt_host: str
-  mqtt_port: port
+  mqtt_host: str?
+  mqtt_port: port?
   mqtt_username: str?
   mqtt_password: password?
-  mqtt_tls: bool
+  mqtt_tls: bool?
   allowed_macs:
     - str
   cloud_relay: bool

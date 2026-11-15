@@ -11,11 +11,13 @@ from typing import Any
 
 @dataclass
 class Config:
-    mqtt_host: str = "localhost"
-    mqtt_port: int = 1883
+    mqtt_host: str = ""
+    mqtt_port: int | None = None  # unset: discovered, else 1883 (8883 with TLS)
     mqtt_username: str = ""
     mqtt_password: str = ""
-    mqtt_tls: bool = False
+    mqtt_tls: bool | None = None  # unset: discovered, else False
+    mqtt_source: str = "options"  # options | supervisor | none (set at startup)
+    mqtt_error: str = ""
     ingress_port: int = 8099
     listen_port: int = 9090  # remap the host port in the app's Network UI
     allowed_macs: list[str] = field(default_factory=list)
@@ -35,6 +37,8 @@ def normalize_mac(mac: str) -> str:
 
 
 def _coerce(name: str, value: Any, default: Any) -> Any:
+    if default is None:
+        default = {"mqtt_port": 0, "mqtt_tls": False}[name]
     if isinstance(default, bool):
         return (
             value if isinstance(value, bool) else str(value).lower() in ("1", "true", "yes", "on")

@@ -4,15 +4,22 @@ Local control for the Coway Airmega 400S (AP-2015E). The purifier normally talks
 
 ## Install
 1. HA Settings, Apps, Repositories: add `https://github.com/metril/ha-coway`.
-2. Install **Coway Bridge**, set the options (`mqtt_host` is required), start it. Needs an MQTT broker you configure explicitly (EMQX, Mosquitto, ...).
+2. Install **Coway Bridge**, start it. Needs an MQTT broker: auto-discovered from HA, or set manually (see MQTT broker).
 3. Open the **Coway Bridge** sidebar panel (debug UI).
+
+## MQTT broker
+If `mqtt_host` is empty, the app asks the HA Supervisor for the broker of an installed MQTT app (host, port, credentials, TLS) and logs where it connected. All `mqtt_*` options are optional (shown under "Show unused optional configuration options"); any you set still takes precedence over the discovered values.
+
+If no broker is provided, the app logs an error and keeps running without MQTT (purifier server and web UI still work). Set it manually:
+- Local EMQX app: `mqtt_host` = the EMQX app hostname (or `homeassistant`), `mqtt_port` 1883, `mqtt_tls` false, plus username/password.
+- External broker: `mqtt_host` `ha.example.com`, `mqtt_port` 8883, `mqtt_tls` true.
 
 ## Options
 | Option | Default | Notes |
 |---|---|---|
-| `mqtt_host` / `mqtt_port` | required / 1883 | Broker (e.g. your EMQX); credentials below |
+| `mqtt_host` / `mqtt_port` | empty / 1883 (8883 with TLS) | Empty = auto-discover from HA; set to override |
 | `mqtt_username` / `mqtt_password` | empty | Broker credentials |
-| `mqtt_tls` | false | TLS to broker |
+| `mqtt_tls` | false (or discovered) | TLS to broker |
 | `allowed_macs` | `[]` | Only these purifier MACs are accepted; empty accepts any. Use `0008DC000001` or `00:08:DC:00:00:01` form |
 | `cloud_relay` | false | Also connect upstream to the Coway cloud (see below) |
 | `cloud_host` | `iocgwo.coway.co.kr:9090` | Upstream `host:port`, resolved at each connect |

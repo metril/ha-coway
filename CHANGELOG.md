@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.2.1
+- MQTT broker auto-discovery via the HA Supervisor (`mqtt:want`): leave `mqtt_host` empty to use the broker from an installed MQTT app. Explicit options still win.
+- No broker configured: clear error in the log and UI; the purifier server and web UI keep running.
+
 ## 0.2.0
 - Redesigned web UI: Device, Diagnostics and Setup tabs; light/dark; mobile layout; tooltips; plain-language message log.
 - AQI (US EPA, from 5-minute mean PM10) in the UI and as an HA sensor.

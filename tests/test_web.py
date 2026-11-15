@@ -266,6 +266,7 @@ def test_connections_never_leak_password():
     web.mqtt = MqttBridge(hub, cfg)
     conns = web.connections([])
     assert conns["mqtt"] == {
+        "source": "options",
         "enabled": True,
         "host": "h",
         "port": 8883,

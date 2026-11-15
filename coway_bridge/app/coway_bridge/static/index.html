@@ -412,7 +412,8 @@ function renderPills() {
     const where = `${m.host}:${m.port}${m.tls ? " over TLS" : " without TLS"}`;
     const cfg = "Change in the app's Configuration (mqtt_host, mqtt_port, mqtt_tls).";
     const label = m.tls ? "MQTT · TLS" : "MQTT";
-    if (!m.enabled) out.push(pill("", "MQTT: off", "MQTT is disabled in this run.", false));
+    if (m.source === "none") out.push(pill("crit", "MQTT: not configured", m.error || "MQTT: no broker configured."));
+    else if (!m.enabled) out.push(pill("", "MQTT: off", "MQTT is disabled in this run.", false));
     else if (m.connected) out.push(pill("ok", label, `MQTT: connected to ${where}. ${cfg}`));
     else if (m.error) out.push(pill("crit", label, `MQTT: not connected to ${where} (${m.error}). ${cfg}`));
     else out.push(pill("warn", label, `MQTT: connecting to ${where}. ${cfg}`));
@@ -558,8 +559,9 @@ function renderConns() {
   const cs = { off: ["Off", ""], on: ["On", "ok"], idle: ["On · waiting for purifier", ""], connecting: ["Connecting…", "warn"], error: ["Error", "crit"] }[c.state] || ["Off", ""];
   const item = (name, st, detail, how, tip) => `<div class="conn" title="${esc(tip)}"><div class="top"><span>${name}</span><span class="pill s ${st[1]}">${esc(st[0])}</span></div><span class="mono sub">${esc(detail)}</span><span class="sub">${esc(how)}</span></div>`;
   $("#d-conns").innerHTML = `<h2 style="margin-bottom:12px">Connections</h2>` +
-    item("Home Assistant (MQTT)", ms, `${m.host}:${m.port}${m.username ? ` as user ${m.username}` : " (no login)"}${m.error ? ` — ${m.error}` : ""}`,
-      "Change in HA → Settings → Apps → Coway Bridge → Configuration: mqtt_host, mqtt_port, mqtt_tls.",
+    item("Home Assistant (MQTT)", m.source === "none" ? ["Not configured", "crit"] : ms,
+      m.source === "none" ? (m.error || "MQTT: no broker configured.") : `${m.host}:${m.port}${m.username ? ` as user ${m.username}` : " (no login)"}${m.source === "supervisor" ? " · Discovered from Home Assistant" : ""}${m.error ? ` — ${m.error}` : ""}`,
+      m.source === "supervisor" ? "Broker found automatically. Set mqtt_host in the app Configuration to override." : "Change in HA → Settings → Apps → Coway Bridge → Configuration: mqtt_host, mqtt_port, mqtt_tls.",
       "How the bridge talks to Home Assistant, via your EMQX broker. Turn TLS off (mqtt_tls: false) when the app connects to EMQX locally inside HAOS, e.g. port 1883; keep it on for external hostnames like :8883.") +
     item("Coway cloud forwarding", cs, `${c.host || "—"}${c.state === "on" ? "" : c.state === "error" && c.error ? ` — ${c.error}` : " (not connected)"}`,
       "Turn on with cloud_relay: true in the app Configuration. The app restarts to apply.",

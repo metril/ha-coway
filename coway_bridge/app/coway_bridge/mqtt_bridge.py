@@ -262,6 +262,24 @@ class SubscribeRefused(Exception):
     pass
 
 
+_NOT_AUTH = (
+    "MQTT broker refused the connection: not authorized. "
+    "Set mqtt_username and mqtt_password (or check the broker's ACL)."
+)
+_BAD_CRED = "MQTT broker refused the connection: bad username or password."
+
+
+def _connack_refusal(e: Exception) -> str | None:
+    """Actionable text for a CONNACK refusal (v5 reason 134/135, v3.1.1 rc 4/5)."""
+    rc = getattr(e, "rc", None)
+    code = getattr(rc, "value", rc)
+    if code in (135, 5):
+        return _NOT_AUTH
+    if code in (134, 4):
+        return _BAD_CRED
+    return None
+
+
 class MqttBridge:
     def __init__(self, hub: DeviceHub, cfg, base: str = BASE, prefix: str = PREFIX):
         self.hub, self.cfg, self.base, self.prefix = hub, cfg, base, prefix
@@ -282,6 +300,7 @@ class MqttBridge:
         """Connection status for the web UI (never includes the password)."""
         c = self.cfg
         return {
+            "source": c.mqtt_source,
             "host": c.mqtt_host,
             "port": c.mqtt_port,
             "tls": bool(c.mqtt_tls),
@@ -467,8 +486,14 @@ class MqttBridge:
                         await self._publish_offline(client)  # before the clean disconnect
                         return
             except (aiomqtt.MqttError, SubscribeRefused) as e:
-                self.connected, self.error = False, str(e) or type(e).__name__
-                log.warning("mqtt error: %r; retrying in %gs", e, delay)
+                self.connected = False
+                refused = _connack_refusal(e)
+                if refused:
+                    self.error = refused
+                    log.error("%s Retrying in %gs.", refused, delay)
+                else:
+                    self.error = str(e) or type(e).__name__
+                    log.warning("mqtt error: %r; retrying in %gs", e, delay)
             with contextlib.suppress(TimeoutError):
                 await asyncio.wait_for(self._stop.wait(), delay)
             delay = min(delay * 2, MAX_RETRY_DELAY)

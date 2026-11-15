@@ -294,3 +294,42 @@ async def test_discovery_summary_logged_once_per_connect(fake_mqtt, caplog):
     assert len(lines) == 1
     assert MAC in lines[0] and "configs (fan, light, sensitivity, timer, pm10, aqi" in lines[0]
     assert "homeassistant/" in lines[0]
+
+
+@pytest.mark.parametrize(
+    "rc,text",
+    [
+        (135, "not authorized. Set mqtt_username and mqtt_password (or check the broker's ACL)."),
+        (134, "bad username or password."),
+        (5, "not authorized."),
+        (4, "bad username or password."),
+    ],
+)
+async def test_connack_refused_actionable_error(monkeypatch, caplog, rc, text):
+    import aiomqtt
+
+    n = []
+
+    class Refusing:
+        def __init__(self, *a, **kw):
+            n.append(1)
+
+        async def __aenter__(self):
+            raise aiomqtt.MqttCodeError(rc)
+
+        async def __aexit__(self, *a):
+            pass
+
+    monkeypatch.setattr(aiomqtt, "Client", Refusing)
+    b = _bridge()
+    task = asyncio.create_task(b.run())
+    for _ in range(150):
+        if len(n) >= 3:
+            break
+        await asyncio.sleep(0.02)
+    assert len(n) >= 3  # backoff retries continue
+    assert f"MQTT broker refused the connection: {text}" in b.status()["error"]
+    b.request_stop()
+    await asyncio.wait_for(task, 3)
+    errs = [r.getMessage() for r in caplog.records if r.levelname == "ERROR"]
+    assert errs and f"MQTT broker refused the connection: {text}" in errs[0]
