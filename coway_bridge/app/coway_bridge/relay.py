@@ -178,6 +178,9 @@ class Relay:
             "retry_in": retry_in,
             "error": error,
         }
+        prev = self._status.get(mac)
+        if prev is None or prev["state"] != state:
+            log.info("upstream relay for %s: %s", mac, state)
         self._status[mac] = st
         for cb in self._cbs:
             try:

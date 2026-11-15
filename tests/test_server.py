@@ -79,6 +79,7 @@ def test_cert_subject(tmp_path):
     cert, _ = ensure_cert(tmp_path)
     c = x509.load_pem_x509_certificate(open(cert, "rb").read())
     assert "CN=Coway_iTrust" in c.subject.rfc4514_string()
+    assert c.signature_hash_algorithm.name == "sha1"
     assert ensure_cert(tmp_path)[0] == cert
 
 
@@ -113,6 +114,26 @@ def test_cert_is_sha1_and_regenerated_if_not(tmp_path, caplog):
     c3 = x509.load_pem_x509_certificate(open(cert, "rb").read())
     assert isinstance(c3.signature_hash_algorithm, hashes.SHA1)
     assert "not SHA1" in caplog.text
+    assert c3.signature_algorithm_oid._name == "sha1WithRSAEncryption"
+    assert c3.subject.rfc4514_string() == (
+        "CN=Coway_iTrust,OU=SW Dev Unit,O=COWAY,L=Seoul,ST=Seoul,C=KR"
+    )
+
+
+async def test_session_lifecycle_logged_at_info(hub, caplog):
+    import logging
+
+    caplog.set_level(logging.INFO)
+    p = await Purifier.connect(hub.port)
+    p.send("A1000QMV0.0.0.13")
+    await wait_for(lambda: hub.device_state(MAC)["firmware"] == "0.0.0.13")
+    p.w.close()
+    await wait_for(lambda: not hub.device_state(MAC)["online"])
+    await asyncio.sleep(0.05)
+    text = caplog.text
+    assert "purifier connected" in text and MAC in text and "127.0.0.1" in text
+    assert f"purifier {MAC} is now online" in text and f"purifier {MAC} is now offline" in text
+    assert "purifier disconnected" in text and "0.0.0.13" in text
 
 
 async def test_session_flow(hub):

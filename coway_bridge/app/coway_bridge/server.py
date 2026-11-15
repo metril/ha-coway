@@ -264,6 +264,8 @@ class DeviceHub:
     # --- connection handling -----------------------------------------------------
     async def _set_online(self, mac: str, online: bool) -> None:
         d = self._dev(mac)
+        if d["online"] != online:
+            log.info("purifier %s is now %s", mac, "online" if online else "offline")
         d["online"] = online
         for cb in self._online_cbs:
             await _call(cb, mac, online, d["firmware"])

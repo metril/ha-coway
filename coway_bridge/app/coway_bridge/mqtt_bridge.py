@@ -325,21 +325,48 @@ class MqttBridge:
         """Ask run() to publish retained offline topics, disconnect cleanly and return."""
         self._stop.set()
 
-    async def _pub(self, client, topic: str, payload, retain: bool = True) -> None:
-        """QoS1 publish; log (once per topic) if the broker refuses it."""
-        rc = await client.publish(topic, payload, qos=1, retain=retain)
+    def _check_pub(self, topic: str, rc) -> None:
+        """Log (once per topic) if the broker refused a publish (v5 PUBACK reason code >= 0x80)."""
         if rc_failed(rc):
             if topic not in self._pub_refused:
                 self._pub_refused.add(topic)
                 log.error(
-                    "mqtt publish to %s refused by broker (reason code 0x%02x, user %r): "
-                    "check the user's publish permissions",
+                    "mqtt publish to %s refused by broker (reason code 0x%02x): "
+                    "check broker ACL for user %r",
                     topic,
                     _rc_value(rc),
                     self.cfg.mqtt_username or None,
                 )
         else:
             self._pub_refused.discard(topic)
+
+    def _hook_puback(self, client) -> None:
+        """aiomqtt drops PUBACK reason codes; tap paho's on_publish to see ACL refusals."""
+        pc = getattr(client, "_client", None)
+        if pc is None or not hasattr(pc, "on_publish"):
+            return
+        topics: dict[int, str] = {}
+        orig_publish, orig_cb = pc.publish, pc.on_publish
+
+        def publish(topic, *a, **kw):
+            info = orig_publish(topic, *a, **kw)
+            if getattr(info, "mid", None) is not None:
+                topics[info.mid] = topic
+            return info
+
+        def on_publish(c, userdata, mid, reason_code=None, properties=None):
+            t = topics.pop(mid, None)
+            if t is not None and reason_code is not None:
+                self._check_pub(t, reason_code)
+            return orig_cb(c, userdata, mid, reason_code, properties)
+
+        pc.publish, pc.on_publish = publish, on_publish
+
+    async def _pub(self, client, topic: str, payload, retain: bool = True) -> None:
+        """QoS1 publish; refusals are logged via the PUBACK hook (or the return value)."""
+        rc = await client.publish(topic, payload, qos=1, retain=retain)
+        if rc is not None:
+            self._check_pub(topic, rc)
 
     async def _subscribe(self, client, topic: str) -> None:
         rcs = await client.subscribe(topic, qos=1)
@@ -348,8 +375,8 @@ class MqttBridge:
         bad = [rc for rc in rcs if rc_failed(rc)]
         if bad:
             log.error(
-                "mqtt subscribe to %s refused by broker (reason code 0x%02x, user %r): "
-                "not authorized? check the user's topic permissions",
+                "mqtt subscribe to %s refused by broker (reason code 0x%02x): "
+                "check broker ACL for user %r",
                 topic,
                 _rc_value(bad[0]),
                 self.cfg.mqtt_username or None,
@@ -383,8 +410,10 @@ class MqttBridge:
                     username=cfg.mqtt_username or None,
                     password=cfg.mqtt_password or None,
                     tls_context=tls,
+                    protocol=aiomqtt.ProtocolVersion.V5,
                     will=aiomqtt.Will(f"{self.base}/status", "offline", retain=True),
                 ) as client:
+                    self._hook_puback(client)
                     log.info("mqtt connected")
                     while not self._q.empty():
                         self._q.get_nowait()

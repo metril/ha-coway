@@ -43,3 +43,29 @@ def decode_control(regs: dict[int, int]) -> dict[str, object]:
 def decode_sensors(regs: dict[int, int]) -> dict[str, int]:
     names = {S_PM10: "pm10", S_LUX: "lux", S_PREFILTER: "prefilter_used", S_HEPA: "hepa_used"}
     return {n: regs[r] for r, n in names.items() if r in regs}
+
+
+def writes_for(entity: str, value: str, control: dict[int, int]) -> dict[int, int] | None:
+    """Map a mode/timer/sensitivity command to {reg: val}; None if the value is invalid.
+
+    Shared by the web UI and the MQTT bridge. `entity` "preset" is an alias of "mode".
+    Mode writes power the unit on when it is off (setting a mode while off has no effect).
+    """
+    v = value.strip() if isinstance(value, str) else value
+    if entity in ("mode", "preset"):
+        if v == "smart":
+            w = {R_MODE: 1}
+        elif v == "bedtime":
+            w = {R_MODE: 2}
+        elif v == "manual":  # the unit flips to manual when a speed is written
+            w = {R_SPEED: control.get(R_SPEED) or 1}
+        else:
+            return None
+        return w if control.get(R_POWER) else {R_POWER: 1, **w}
+    if entity == "timer":
+        inv = {name: reg for reg, name in TIMER.items()}
+        return {R_TIMER: inv[v]} if v in inv else None
+    if entity == "sensitivity":
+        inv = {name: reg for reg, name in SENSITIVITY.items()}
+        return {R_SENS: inv[v]} if v in inv else None
+    return None

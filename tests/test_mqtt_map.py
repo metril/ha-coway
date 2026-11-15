@@ -81,15 +81,30 @@ def test_discovery():
     assert "sw_version" not in m.discovery_messages(MAC)[0][1]["device"]
 
 
+class _FakePaho:
+    """Minimal paho stand-in: publish() returns an info with a mid; acks go to on_publish."""
+
+    def __init__(self):
+        self.mid = 0
+        self.on_publish = lambda *a: None
+
+    def publish(self, topic, *a, **kw):
+        self.mid += 1
+        return type("Info", (), {"mid": self.mid})()
+
+
 class FakeClient:
     instances: list = []
     fail_first_publish = False
     sub_rc: list = [1]
     pub_rc = None
+    puback_rc = None
 
     def __init__(self, *a, **kw):
         self.published = []
+        self.kw = kw
         self.messages = self._msgs()
+        self._client = _FakePaho()
         FakeClient.instances.append(self)
 
     async def _msgs(self):
@@ -109,6 +124,9 @@ class FakeClient:
         if FakeClient.fail_first_publish and self is FakeClient.instances[0] and "/state" in topic:
             raise RuntimeError("boom")
         self.published.append((topic, payload, retain))
+        info = self._client.publish(topic, payload)
+        if FakeClient.puback_rc is not None:  # v5 PUBACK reason code via paho callback
+            self._client.on_publish(None, None, info.mid, FakeClient.puback_rc, None)
         return FakeClient.pub_rc
 
 
@@ -120,6 +138,7 @@ def fake_mqtt(monkeypatch):
     FakeClient.fail_first_publish = False
     FakeClient.sub_rc = [1]
     FakeClient.pub_rc = None
+    FakeClient.puback_rc = None
     monkeypatch.setattr(aiomqtt, "Client", FakeClient)
     return FakeClient
 
@@ -200,3 +219,31 @@ async def test_publish_refused_logged_once_per_topic(fake_mqtt, caplog):
     msgs = [r.getMessage() for r in caplog.records if r.levelname == "ERROR"]
     assert sum("coway_bridge/x/state" in x for x in msgs) == 1
     assert any("coway_bridge/status" in x for x in msgs)
+
+
+async def test_uses_mqtt_v5(fake_mqtt):
+    import aiomqtt
+
+    b = _bridge()
+    task = asyncio.create_task(b.run())
+    await asyncio.sleep(0.2)
+    b.request_stop()
+    await asyncio.wait_for(task, 3)
+    assert fake_mqtt.instances[0].kw["protocol"] == aiomqtt.ProtocolVersion.V5
+
+
+async def test_puback_refused_via_paho_hook_logs_acl_error_once(fake_mqtt, caplog):
+    fake_mqtt.puback_rc = 0x87  # Not authorized
+    b = _bridge()
+    b.cfg.mqtt_username = "coway"
+    task = asyncio.create_task(b.run())
+    await asyncio.sleep(0.3)
+    b._put("coway_bridge/x/state", "1")
+    b._put("coway_bridge/x/state", "2")
+    await asyncio.sleep(0.2)
+    b.request_stop()
+    await asyncio.wait_for(task, 3)
+    msgs = [r.getMessage() for r in caplog.records if r.levelname == "ERROR"]
+    mine = [x for x in msgs if "coway_bridge/x/state" in x]
+    assert len(mine) == 1
+    assert "check broker ACL for user 'coway'" in mine[0]
