@@ -1,5 +1,12 @@
 # Changelog
 
+## 0.2.3
+- Unknown registers (`reg_XXXX` / `sreg_XXXX`) are no longer published to HA; they stay in the web UI register table and message log.
+- New optional `mqtt_base_topic` (default `coway_bridge`, unchanged from 0.2.2).
+- Entity keys renamed: `lux` to `light_sensor`, `prefilter` to `pre_filter`, `hepa` to `max2_filter` (discovery topics, unique IDs, state JSON).
+- HA identifiers renamed from `coway_<mac>` to `airmega_400s_<mac>` (discovery node, unique IDs, device identifiers).
+- **Upgrade note:** the base topic is unchanged, but discovery topics, unique IDs and entity keys changed. Delete the old Airmega device in HA (Settings, Devices & services, MQTT, INFO, three-dot menu, Delete) before or after updating. Old retained discovery under `homeassistant/*/coway_<mac>/` is cleared by deleting the device. Automations and dashboards must be re-pointed to the new entities.
+
 ## 0.2.2
 - Fan entity gets an air-purifier icon.
 - Availability robustness on shared brokers: retained `status` and per-purifier `online` are re-published every 5 minutes; shutdown marks offline only purifiers connected to this bridge, so one bridge stopping no longer marks another's devices offline.

@@ -18,8 +18,8 @@ def test_derive_state():
     s = m.derive_state(DEV)
     assert s["power"] == "ON" and s["percentage"] == 66 and s["preset"] == "manual"
     assert (s["light"], s["sensitivity"], s["timer"]) == ("ON", "sensitive", "2h")
-    assert (s["pm10"], s["lux"], s["prefilter"], s["hepa"]) == (5, 894, 70, 0)
-    assert s["reg_000E"] == 1 and s["sreg_0030"] == 7
+    assert (s["pm10"], s["light_sensor"], s["pre_filter"], s["max2_filter"]) == (5, 894, 70, 0)
+    assert not any(k.startswith(("reg_", "sreg_")) for k in s)
     off = m.derive_state({"control": {1: 0, 3: 3, 2: 1}, "sensor": {}})
     assert off["power"] == "OFF" and off["percentage"] == 0 and off["preset"] == "smart"
     assert m.derive_state({"control": {}, "sensor": {}}) == {}
@@ -48,39 +48,35 @@ def test_commands():
 
 
 def test_discovery():
-    msgs = m.discovery_messages(MAC, "0.0.0.13", (0x30,))
+    msgs = m.discovery_messages(MAC, "0.0.0.13")
     topics = {t for t, _ in msgs}
     for t in (
-        "fan/coway_0008dc000001/fan",
-        "switch/coway_0008dc000001/light",
-        "select/coway_0008dc000001/sensitivity",
-        "select/coway_0008dc000001/timer",
-        "sensor/coway_0008dc000001/pm10",
-        "sensor/coway_0008dc000001/lux",
-        "sensor/coway_0008dc000001/prefilter",
-        "sensor/coway_0008dc000001/hepa",
-        "sensor/coway_0008dc000001/reg_0022",
-        "sensor/coway_0008dc000001/sreg_0030",
+        "fan/airmega_400s_0008dc000001/fan",
+        "switch/airmega_400s_0008dc000001/light",
+        "select/airmega_400s_0008dc000001/sensitivity",
+        "select/airmega_400s_0008dc000001/timer",
+        "sensor/airmega_400s_0008dc000001/pm10",
+        "sensor/airmega_400s_0008dc000001/light_sensor",
+        "sensor/airmega_400s_0008dc000001/pre_filter",
+        "sensor/airmega_400s_0008dc000001/max2_filter",
     ):
         assert f"homeassistant/{t}/config" in topics
     ids = [p["unique_id"] for _, p in msgs]
     assert len(ids) == len(set(ids))
-    fan = dict(msgs)["homeassistant/fan/coway_0008dc000001/fan/config"]
+    fan = dict(msgs)["homeassistant/fan/airmega_400s_0008dc000001/fan/config"]
     assert fan["name"] is None
     assert all("object_id" not in p for _, p in msgs)
     assert fan["preset_modes"] == ["smart", "bedtime", "manual"]
     d = fan["device"]
     assert (d["manufacturer"], d["model"], d["sw_version"]) == ("Coway", "AP-2015E", "0.0.0.13")
-    assert d["name"] == "Airmega 400S" and d["identifiers"] == ["coway_0008dc000001"]
-    assert fan["unique_id"] == "coway_0008dc000001_fan"
+    assert d["name"] == "Airmega 400S" and d["identifiers"] == ["airmega_400s_0008dc000001"]
+    assert fan["unique_id"] == "airmega_400s_0008dc000001_fan"
     assert all("default_entity_id" not in p and "object_id" not in p for _, p in msgs)
     assert "Coway" not in " ".join(p["name"] or "" for _, p in msgs)
     assert d["connections"] == [["mac", "00:08:dc:00:00:01"]]
     assert fan["availability_mode"] == "all" and len(fan["availability"]) == 2
-    diag = dict(msgs)["homeassistant/sensor/coway_0008dc000001/reg_000E/config"]
-    assert (
-        diag["entity_category"] == "diagnostic" and diag["entity_registry_enabled_default"] is False
-    )
+    assert not any("reg_" in t for t in topics)
+    assert not any("coway" in t.lower() for t in topics)
     json.dumps(msgs)
     assert "sw_version" not in m.discovery_messages(MAC)[0][1]["device"]
 
@@ -259,10 +255,15 @@ def test_aqi_and_names():
     msgs = {t.split("/")[-2]: p for t, p in m.discovery_messages(MAC)}
     assert msgs["aqi"]["name"] == "AQI" and msgs["aqi"]["device_class"] == "aqi"
     assert "unit_of_measurement" not in msgs["aqi"]
-    assert msgs["aqi"]["unique_id"] == f"coway_{MAC.lower()}_aqi"
-    assert msgs["lux"]["name"] == "Light sensor" and msgs["lux"]["unit_of_measurement"] == "lx"
-    assert msgs["prefilter"]["name"] == "Pre-filter" and msgs["hepa"]["name"] == "Max2 filter"
-    assert msgs["hepa"]["unique_id"] == f"coway_{MAC.lower()}_hepa"
+    assert msgs["aqi"]["unique_id"] == f"airmega_400s_{MAC.lower()}_aqi"
+    assert (
+        msgs["light_sensor"]["name"] == "Light sensor"
+        and msgs["light_sensor"]["unit_of_measurement"] == "lx"
+    )
+    assert (
+        msgs["pre_filter"]["name"] == "Pre-filter" and msgs["max2_filter"]["name"] == "Max2 filter"
+    )
+    assert msgs["max2_filter"]["unique_id"] == f"airmega_400s_{MAC.lower()}_max2_filter"
 
 
 def test_writes_for_shared():

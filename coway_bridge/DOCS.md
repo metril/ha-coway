@@ -20,6 +20,7 @@ If no broker is provided, the app logs an error and keeps running without MQTT (
 | `mqtt_host` / `mqtt_port` | empty / 1883 (8883 with TLS) | Empty = auto-discover from HA; set to override |
 | `mqtt_username` / `mqtt_password` | empty | Broker credentials |
 | `mqtt_tls` | false (or discovered) | TLS to broker |
+| `mqtt_base_topic` | `coway_bridge` | Topic prefix for state/commands (change only if it clashes) |
 | `allowed_macs` | `[]` | Only these purifier MACs are accepted; empty accepts any. Use `0008DC000001` or `00:08:DC:00:00:01` form |
 | `cloud_relay` | false | Also connect upstream to the Coway cloud (see below) |
 | `cloud_host` | `iocgwo.coway.co.kr:9090` | Upstream `host:port`, resolved at each connect |
@@ -27,6 +28,18 @@ If no broker is provided, the app logs an error and keeps running without MQTT (
 | `log_level` | info | |
 
 The debug UI is served on ingress port 8099 (not exposed on the host; under HAOS only the Supervisor ingress proxy may reach it). The purifier port is always 9090 inside the container; to use another host port, change it in the app's Network UI.
+
+## MQTT topics
+With the default `mqtt_base_topic` (`<mac>` is the lowercase purifier MAC):
+
+| Topic | Purpose |
+|---|---|
+| `coway_bridge/status` | Bridge availability (`online`/`offline`, LWT) |
+| `coway_bridge/<mac>/online` | Purifier availability |
+| `coway_bridge/<mac>/state` | JSON state |
+| `coway_bridge/<mac>/<entity>/set` | Commands (`power`, `percentage`, `preset`, `light`, `sensitivity`, `timer`) |
+
+Discovery configs go to `homeassistant/<platform>/airmega_400s_<mac>/<entity>/config`; unique IDs are `airmega_400s_<mac>_<entity>`.
 
 ## Network (pfSense example)
 The purifier must reach this app on TCP 9090 while believing it talks to the cloud.
@@ -46,4 +59,4 @@ To (re)provision the purifier, put it in pairing mode (hold the Wi-Fi button unt
 With `cloud_relay: true` the app opens a TLS connection per purifier to `cloud_host`, forwards frames both ways (so IoCare keeps working), still decodes everything for HA, and stops its own polling. HA commands are injected as `A1011QG`/`A1012QG` frames and only the acks matching those local commands are swallowed so the cloud never sees them. Purifier frames received before upstream connects are buffered (up to 50) and flushed on connect. If upstream drops, local polling resumes and the app retries with exponential backoff (max 5 min). No IP is hardcoded; name resolution uses the HAOS resolver.
 
 ## Discovering new registers
-Unknown registers show up as disabled diagnostic sensors `reg_XXXX` and are highlighted (`!`) in the debug UI. To find a command register (e.g. filter reset): enable relay mode, trigger the action in the IoCare app, then find the cloud-to-purifier (`C→P`) `A1011QG` frame in the UI Frame log. Use **Download** to save a capture (`allframes.txt` format, one hex frame per line) for analysis.
+Unknown registers are not published to HA; they are highlighted (`!`) in the debug UI register table and message log. To find a command register (e.g. filter reset): enable relay mode, trigger the action in the IoCare app, then find the cloud-to-purifier (`C→P`) `A1011QG` frame in the UI Frame log. Use **Download** to save a capture (`allframes.txt` format, one hex frame per line) for analysis.

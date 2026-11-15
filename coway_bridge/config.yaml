@@ -1,5 +1,5 @@
 name: Coway Bridge
-version: "0.2.2"
+version: "0.2.3"
 slug: coway_bridge
 description: Local control of Coway Airmega 400S (AP-2015E) purifiers via MQTT discovery
 url: https://github.com/metril/ha-coway
@@ -32,6 +32,7 @@ schema:
   mqtt_username: str?
   mqtt_password: password?
   mqtt_tls: bool?
+  mqtt_base_topic: str?
   allowed_macs:
     - str
   cloud_relay: bool

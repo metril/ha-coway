@@ -18,6 +18,7 @@ class Config:
     mqtt_tls: bool | None = None  # unset: discovered, else False
     mqtt_source: str = "options"  # options | supervisor | none (set at startup)
     mqtt_error: str = ""
+    mqtt_base_topic: str = "coway_bridge"
     ingress_port: int = 8099
     listen_port: int = 9090  # remap the host port in the app's Network UI
     allowed_macs: list[str] = field(default_factory=list)

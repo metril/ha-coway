@@ -20,7 +20,8 @@ from .aqi import AqiTracker
 from .server import DeviceHub
 
 log = logging.getLogger(__name__)
-BASE = "coway_bridge"
+BASE = "coway_bridge"  # default topic prefix
+NODE = "airmega_400s"
 PREFIX = "homeassistant"
 SPEEDS = {1: 33, 2: 66, 3: 100}
 TIMER_OPTIONS = list(R.TIMER.values())
@@ -56,17 +57,11 @@ def derive_state(dev: dict, aqi: int | None = None) -> dict:
     if aqi is not None:
         out["aqi"] = aqi
     if R.S_LUX in s:
-        out["lux"] = s[R.S_LUX]
+        out["light_sensor"] = s[R.S_LUX]
     if R.S_PREFILTER in s:
-        out["prefilter"] = max(0, 100 - s[R.S_PREFILTER])
+        out["pre_filter"] = max(0, 100 - s[R.S_PREFILTER])
     if R.S_HEPA in s:
-        out["hepa"] = max(0, 100 - s[R.S_HEPA])
-    for r in R.CONTROL_UNKNOWN:
-        if r in c:
-            out[f"reg_{r:04X}"] = c[r]
-    for r, v in s.items():
-        if r not in R.SENSOR_KNOWN:
-            out[f"sreg_{r:04X}"] = v
+        out["max2_filter"] = max(0, 100 - s[R.S_HEPA])
     return out
 
 
@@ -101,7 +96,6 @@ def command_to_writes(entity: str, payload: str, dev: dict) -> dict[int, int] | 
 def discovery_messages(
     mac: str,
     firmware: str | None = None,
-    extra_sensor_regs: tuple[int, ...] = (),
     base: str = BASE,
     prefix: str = PREFIX,
 ) -> list[tuple[str, dict]]:
@@ -109,7 +103,7 @@ def discovery_messages(
     did = dev_id(mac)
     t = f"{base}/{did}"
     device = {
-        "identifiers": [f"coway_{did}"],
+        "identifiers": [f"{NODE}_{did}"],
         "connections": [["mac", ":".join(mac[i : i + 2] for i in range(0, 12, 2)).lower()]],
         "manufacturer": "Coway",
         "model": "AP-2015E",
@@ -128,10 +122,10 @@ def discovery_messages(
     def add(platform: str, key: str, payload: dict) -> None:
         payload = {
             **common,
-            "unique_id": f"coway_{did}_{key}",
+            "unique_id": f"{NODE}_{did}_{key}",
             **payload,
         }
-        msgs.append((f"{prefix}/{platform}/coway_{did}/{key}/config", payload))
+        msgs.append((f"{prefix}/{platform}/{NODE}_{did}/{key}/config", payload))
 
     add(
         "fan",
@@ -205,10 +199,10 @@ def discovery_messages(
     )
     add(
         "sensor",
-        "lux",
+        "light_sensor",
         {
             "name": "Light sensor",
-            "value_template": "{{ value_json.lux }}",
+            "value_template": "{{ value_json.light_sensor }}",
             "device_class": "illuminance",
             "unit_of_measurement": "lx",
             "state_class": "measurement",
@@ -216,10 +210,10 @@ def discovery_messages(
     )
     add(
         "sensor",
-        "prefilter",
+        "pre_filter",
         {
             "name": "Pre-filter",
-            "value_template": "{{ value_json.prefilter }}",
+            "value_template": "{{ value_json.pre_filter }}",
             "unit_of_measurement": "%",
             "icon": "mdi:air-filter",
             "state_class": "measurement",
@@ -227,22 +221,15 @@ def discovery_messages(
     )
     add(
         "sensor",
-        "hepa",
+        "max2_filter",
         {
             "name": "Max2 filter",
-            "value_template": "{{ value_json.hepa }}",
+            "value_template": "{{ value_json.max2_filter }}",
             "unit_of_measurement": "%",
             "icon": "mdi:air-filter",
             "state_class": "measurement",
         },
     )
-    diag = {"entity_category": "diagnostic", "entity_registry_enabled_default": False}
-    for r in R.CONTROL_UNKNOWN:
-        k = f"reg_{r:04X}"
-        add("sensor", k, {"name": k, "value_template": f"{{{{ value_json.{k} }}}}", **diag})
-    for r in extra_sensor_regs:
-        k = f"sreg_{r:04X}"
-        add("sensor", k, {"name": k, "value_template": f"{{{{ value_json.{k} }}}}", **diag})
     return msgs
 
 
@@ -282,10 +269,10 @@ def _connack_refusal(e: Exception) -> str | None:
 
 
 class MqttBridge:
-    def __init__(self, hub: DeviceHub, cfg, base: str = BASE, prefix: str = PREFIX):
-        self.hub, self.cfg, self.base, self.prefix = hub, cfg, base, prefix
+    def __init__(self, hub: DeviceHub, cfg, base: str | None = None, prefix: str = PREFIX):
+        self.hub, self.cfg, self.prefix = hub, cfg, prefix
+        self.base = base or getattr(cfg, "mqtt_base_topic", "") or BASE
         self._q: asyncio.Queue = asyncio.Queue(maxsize=1000)
-        self._extra: dict[str, set[int]] = {}
         self._stop = asyncio.Event()
         self.keepalive_interval = 300.0  # re-publish retained availability this often
         self.retry_delay = 5.0  # initial backoff; doubles per failure up to MAX_RETRY_DELAY
@@ -321,8 +308,7 @@ class MqttBridge:
             log.warning("mqtt queue full, dropping %s", topic)
 
     def _publish_discovery(self, mac: str) -> None:
-        extra = tuple(sorted(self._extra.get(mac, ())))
-        msgs = discovery_messages(mac, self._firmware.get(mac), extra, self.base, self.prefix)
+        msgs = discovery_messages(mac, self._firmware.get(mac), self.base, self.prefix)
         for topic, payload in msgs:
             self._put(topic, json.dumps(payload))
         key = (mac, tuple(t for t, _ in msgs))
@@ -337,10 +323,6 @@ class MqttBridge:
             )
 
     def _on_state(self, mac: str, dev: dict) -> None:
-        extra = {r for r in dev["sensor"] if r not in R.SENSOR_KNOWN}
-        if extra - self._extra.get(mac, set()):
-            self._extra.setdefault(mac, set()).update(extra)
-            self._publish_discovery(mac)
         self._put(f"{self.base}/{dev_id(mac)}/state", self._state_json(mac, dev))
 
     def _on_online(self, mac: str, online: bool, firmware: str | None) -> None:
