@@ -3,330 +3,838 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>coway-bridge</title>
+<meta name="application-name" content="coway-bridge">
+<meta name="color-scheme" content="light dark">
+<title>Coway Bridge</title>
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='8' fill='%2303a9f4'/%3E%3Cpath d='M16 16c0-6 3-9 6-8s1 6-6 8zm0 0c6 0 9 3 8 6s-6 1-8-6zm0 0c0 6-3 9-6 8s-1-6 6-8zm0 0c-6 0-9-3-8-6s6-1 8 6z' fill='white'/%3E%3C/svg%3E">
 <style>
-:root{--bg:#fafafa;--card:#fff;--text:#212121;--muted:#5f6368;--border:#e0e0e0;--accent:#03a9f4;--accent-text:#0277bd;--ok:#2e7d32;--warn:#b26a00;--err:#c62828;--warn-bg:#fff4e0;--accent-bg:#e1f5fe;--dir-pa:#1565c0;--dir-ap:#2e7d32;--dir-cp:#6a1b9a;--dir-pc:#b45309;color-scheme:light dark}
-@media (prefers-color-scheme:dark){:root{--bg:#111;--card:#1c1c1c;--text:#e1e1e1;--muted:#9b9b9b;--border:#2f2f2f;--accent:#4fc3f7;--accent-text:#4fc3f7;--ok:#66bb6a;--warn:#ffb74d;--err:#ef5350;--warn-bg:#3a2a10;--accent-bg:#0d2a3a;--dir-pa:#64b5f6;--dir-ap:#81c784;--dir-cp:#ce93d8;--dir-pc:#ffb74d}}
+:root{
+  --bg:#f4f6f8;--card:#ffffff;--card2:#f1f3f5;--text:#1c1f22;--muted:#5f6870;--line:#e2e6ea;
+  --primary:#0288d1;--on-primary:#ffffff;--soft:#e1f3fd;--ok:#2e7d32;--warn:#b26a00;--crit:#c62828;
+  --unk:#fff7e0;--e1:0 1px 2px rgba(0,0,0,.06),0 1px 3px rgba(0,0,0,.08);
+  --mono:ui-monospace,"SF Mono",Menlo,Consolas,monospace;
+}
+@media (prefers-color-scheme: dark){
+  :root{
+    --bg:#111315;--card:#1c1f22;--card2:#25292d;--text:#e6e8ea;--muted:#9aa3ab;--line:#30353a;
+    --primary:#18bcf2;--on-primary:#00222e;--soft:#0f3442;--ok:#66bb6a;--warn:#ffb74d;--crit:#ef5350;
+    --unk:#33290f;--e1:0 0 0 1px #30353a;
+  }
+}
 *{box-sizing:border-box}
-body{margin:0;background:var(--bg);color:var(--text);font:14px/1.45 system-ui,-apple-system,"Segoe UI",Roboto,sans-serif;font-variant-numeric:tabular-nums}
-.mono,pre,code,td.mono{font:12.5px ui-monospace,SFMono-Regular,Menlo,Consolas,monospace}
-header{display:flex;flex-wrap:wrap;align-items:center;gap:12px;padding:12px 16px;border-bottom:1px solid var(--border);background:var(--card)}
-header h1{font-size:16px;margin:0;font-weight:600}
-header .sp{flex:1}
-main{max-width:1440px;margin:0 auto;padding:16px;display:grid;gap:16px;grid-template-columns:1fr}
-@media (min-width:900px){main{grid-template-columns:minmax(320px,1fr) 2fr}}
-.col{display:flex;flex-direction:column;gap:16px;min-width:0}
-.card{background:var(--card);border:1px solid var(--border);border-radius:12px;padding:16px;min-width:0}
-.card h2{font-size:16px;font-weight:600;margin:0 0 12px}
-.stale{opacity:.6}
-.banner{background:var(--warn-bg);color:var(--warn);padding:8px 16px;border-bottom:1px solid var(--border)}
-.muted{color:var(--muted)}
-.ok{color:var(--ok)}.warn{color:var(--warn)}.err{color:var(--err)}
+html{color-scheme:light dark}
+body{margin:0;background:var(--bg);color:var(--text);font:14px/20px system-ui,-apple-system,"Segoe UI",Roboto,Ubuntu,sans-serif;font-variant-numeric:tabular-nums}
+a{color:var(--primary)}
 button,input,select{font:inherit;color:inherit}
-button{min-height:36px;padding:0 12px;border:1px solid var(--border);border-radius:8px;background:var(--card);cursor:pointer}
-button:hover:not(:disabled){border-color:var(--accent)}
-button[aria-pressed=true]{background:var(--accent-bg);border-color:var(--accent);color:var(--accent-text)}
-button:disabled{opacity:.5;cursor:not-allowed}
-@media (pointer:coarse){button,input,select{min-height:44px}}
-input,select{min-height:36px;padding:0 8px;border:1px solid var(--border);border-radius:8px;background:var(--card)}
-:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
-dl{display:grid;grid-template-columns:auto 1fr;gap:4px 12px;margin:0}dt{color:var(--muted)}dd{margin:0;word-break:break-all}
-.row{display:flex;flex-wrap:wrap;gap:8px;align-items:center;margin:8px 0}
-.row label{min-width:48px;color:var(--muted)}
-.tw{overflow-x:auto}
-table{border-collapse:collapse;width:100%}
-th,td{text-align:left;padding:4px 8px;border-bottom:1px solid var(--border);white-space:nowrap}
-th{color:var(--muted);font-weight:600}
-tbody.grp th{background:var(--bg);font-size:12px}
-tr.unk{background:var(--warn-bg)}
-td.flash{background:var(--accent-bg)}
-@media (prefers-reduced-motion:no-preference){td.raw{transition:background 1s}}
-.tools{display:flex;flex-wrap:wrap;gap:8px;align-items:center;margin-bottom:8px}
-.seg button[aria-pressed=true]{font-weight:600}
-#log{height:calc(100vh - 340px);min-height:320px;overflow:auto;border:1px solid var(--border);border-radius:8px;position:relative}
-@media (max-width:899px){#log{height:60vh}}
-.fr{display:grid;grid-template-columns:96px 44px 1fr;gap:8px;padding:2px 8px;border-left:3px solid transparent;cursor:pointer;align-items:baseline}
-.fr .raw{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
-.fr .sum{grid-column:3;color:var(--muted)}
-.fr.exp .raw{white-space:normal;word-break:break-all}
-.fr[data-d="P>A"]{border-color:var(--dir-pa)}.fr[data-d="A>P"]{border-color:var(--dir-ap)}.fr[data-d="C>P"]{border-color:var(--dir-cp)}.fr[data-d="P>C"]{border-color:var(--dir-pc)}
-.tag{font-weight:700}
-[data-d="P>A"] .tag{color:var(--dir-pa)}[data-d="A>P"] .tag{color:var(--dir-ap)}[data-d="C>P"] .tag{color:var(--dir-cp)}[data-d="P>C"] .tag{color:var(--dir-pc)}
-.detail{grid-column:1/-1;padding:4px 0}
-#pill{position:sticky;bottom:8px;margin:0 auto;display:block}
-.hide{display:none!important}
-pre{white-space:pre-wrap;word-break:break-all;margin:8px 0;padding:8px;background:var(--bg);border-radius:8px}
-details summary{cursor:pointer;font-weight:600}
-.err-in{color:var(--err);font-size:12px}
-.spin{display:inline-block;width:10px;height:10px;border:2px solid var(--muted);border-top-color:transparent;border-radius:50%;margin-right:4px;vertical-align:-1px}
-@media (prefers-reduced-motion:no-preference){.spin{animation:s 1s linear infinite}@keyframes s{to{transform:rotate(360deg)}}}
+button{cursor:pointer}
+button:focus-visible,input:focus-visible,select:focus-visible,summary:focus-visible,a:focus-visible,[tabindex]:focus-visible{outline:3px solid var(--primary);outline-offset:2px}
+[hidden]{display:none!important}
+.mono{font-family:var(--mono)}
+.sr{position:absolute;width:1px;height:1px;overflow:hidden;clip:rect(0 0 0 0);white-space:nowrap}
+.sub{font-size:13px;color:var(--muted)}
+h1,h2{margin:0;font-weight:500}
+h2{font-size:16px}
+.page{min-height:100vh}
+/* app bar */
+.appbar{position:sticky;top:0;z-index:3;min-height:56px;display:flex;align-items:center;justify-content:space-between;gap:8px 12px;flex-wrap:wrap;padding:8px max(16px,calc((100% - 1100px)/2 + 16px));background:var(--card);border-bottom:1px solid var(--line)}
+.brand{display:flex;align-items:center;gap:10px}
+.brand h1{font-size:16px}
+.brand select{height:32px;border-radius:8px;border:1px solid var(--line);background:var(--card2);padding:0 8px;margin-left:8px}
+.pills{display:flex;gap:8px;flex-wrap:wrap}
+.pill{--c:var(--muted);display:inline-flex;align-items:center;gap:6px;height:28px;padding:0 12px;border-radius:999px;font-size:13px;font-weight:500;white-space:nowrap;color:var(--c);background:color-mix(in srgb,var(--c) 14%,transparent)}
+.pill.s{height:24px;padding:0 10px;font-size:12px}
+.pill.ok{--c:var(--ok)}.pill.warn{--c:var(--warn)}.pill.crit{--c:var(--crit)}
+.dot{width:8px;height:8px;border-radius:50%;background:var(--c,currentColor);flex:none}
+.pulse .dot{animation:pulse 1.2s ease-in-out infinite}
+@keyframes pulse{50%{opacity:.35}}
+.rebar{height:2px;background:var(--warn)}
+/* tabs */
+.tabbar{display:flex;gap:4px;padding:0 max(0px,calc((100% - 1100px)/2));background:var(--card);border-bottom:1px solid var(--line);overflow-x:auto}
+.tab{height:48px;padding:0 16px;border:0;background:transparent;font-size:14px;font-weight:500;color:var(--muted);border-bottom:2px solid transparent;transition:color .2s,border-color .2s}
+.tab[aria-selected=true]{color:var(--primary);border-bottom-color:var(--primary)}
+main{max-width:1100px;margin:0 auto;padding:24px 16px 48px}
+.cols{display:flex;flex-wrap:wrap;gap:16px;align-items:flex-start}
+.card{background:var(--card);border-radius:16px;box-shadow:var(--e1);padding:20px;min-width:0}
+.hero{flex:1 1 440px}
+.tiles{flex:1 1 380px;min-width:0;display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:16px}
+.tile{min-height:132px;display:flex;flex-direction:column;gap:8px;align-items:center;text-align:center}
+.big{display:flex;align-items:baseline;gap:6px}
+.big b{font-size:40px;line-height:48px;font-weight:600}
+.label{width:96px;flex:none;font-size:12px;line-height:16px;font-weight:500;letter-spacing:.04em;text-transform:uppercase;color:var(--muted)}
+.tile .label{width:auto}
+.plain{font-size:12px;color:var(--muted)}
+.hhead{display:flex;justify-content:space-between;align-items:flex-start;gap:12px;flex-wrap:wrap}
+.hhead h2{font-size:20px}
+.hctl{display:flex;align-items:center;gap:12px}
+.power{width:92px;flex:none;height:44px;padding:0;border-radius:999px;border:0;display:flex;align-items:center;justify-content:center;gap:8px;font-size:14px;font-weight:600;transition:all .2s;background:var(--card2);color:var(--muted)}
+.power[aria-pressed=true]{background:var(--primary);color:var(--on-primary)}
+.power:hover{filter:brightness(1.05)}.power:active{transform:scale(.96)}
+.power:disabled{opacity:.5;cursor:not-allowed}
+.rows{display:flex;flex-direction:column;gap:12px;border-top:1px solid var(--line);margin-top:16px;padding-top:16px;transition:opacity .2s}
+.rows.off{opacity:.5}
+.row{display:flex;align-items:center;gap:12px;flex-wrap:wrap}
+.help{font-size:12px;color:var(--muted);margin:-8px 0 0 108px}
+.seg{display:inline-flex;gap:2px;padding:3px;border-radius:10px;background:var(--card2)}
+.seg button{min-width:64px;height:40px;padding:0 14px;border:0;border-radius:8px;background:transparent;color:var(--muted);font-size:14px;font-weight:500;transition:all .2s cubic-bezier(.2,0,0,1)}
+.seg button[aria-checked=true]{background:var(--card);color:var(--primary);box-shadow:var(--e1)}
+.chips{display:flex;gap:8px;flex-wrap:wrap}
+.chip{height:36px;padding:0 14px;border-radius:999px;font-size:14px;font-weight:500;border:1px solid var(--line);background:transparent;color:var(--text);position:relative}
+.chip::after{content:"";position:absolute;inset:-4px 0}
+.chip[aria-checked=true]{border-color:transparent;background:var(--soft);color:var(--primary)}
+.sw{position:relative;width:52px;height:32px;border-radius:999px;border:0;background:var(--line);transition:background .2s;padding:0}
+.sw[aria-checked=true]{background:var(--primary)}
+.sw i{position:absolute;top:4px;left:4px;width:24px;height:24px;border-radius:50%;background:#fff;box-shadow:0 1px 3px rgba(0,0,0,.3);transition:left .2s cubic-bezier(.2,0,0,1)}
+.sw[aria-checked=true] i{left:24px}
+.fan{flex:none;color:var(--muted);transform-origin:50% 50%}
+.fan.on{color:var(--primary);animation:spin var(--spin,1.8s) linear infinite}
+@keyframes spin{to{transform:rotate(360deg)}}
+.busy .label::after{content:"";display:inline-block;width:12px;height:12px;margin-left:6px;vertical-align:-2px;border:2px solid var(--line);border-top-color:var(--primary);border-radius:50%;animation:spin .8s linear infinite}
+.shake{animation:shake .2s}
+@keyframes shake{25%{transform:translateX(-4px)}75%{transform:translateX(4px)}}
+.result{margin-top:14px;padding-top:12px;border-top:1px solid var(--line);font-size:13px;color:var(--ok)}
+.result:empty{display:none}
+.result.err{color:var(--crit)}
+.link{border:0;background:none;color:var(--primary);text-decoration:underline;padding:0 4px}
+.notice{margin-top:16px;padding:10px 12px;border-radius:10px;background:color-mix(in srgb,var(--warn) 14%,transparent);color:var(--warn);font-size:13px}
+.bar{width:100%;max-width:180px;height:8px;border-radius:999px;overflow:hidden;background:var(--line)}
+.bar>div{height:100%;border-radius:999px;background:var(--c)}
+.stat{display:flex;justify-content:space-between;gap:12px;padding:5px 0}
+.conn{display:flex;flex-direction:column;gap:4px;padding:10px 0;border-bottom:1px solid var(--line)}
+.conn:last-child{border-bottom:0;padding-bottom:0}
+.conn .top{display:flex;justify-content:space-between;align-items:center;gap:8px}
+.conn .top span:first-child{font-weight:500}
+.sticky{display:flex;flex-direction:column;gap:16px;flex:1 1 320px;max-width:360px;min-width:0}
+.reghead,.reg{display:flex;gap:8px;align-items:center}
+.reghead{padding:12px 8px 6px;font-size:11px;font-weight:600;letter-spacing:.04em;text-transform:uppercase;color:var(--muted);border-bottom:1px solid var(--line);margin-bottom:4px}
+.reg{padding:6px 8px;border-radius:6px;font-size:13px}
+.reg.unk{background:var(--unk)}
+.reg.flash{animation:flash .6s}
+@keyframes flash{from{background:var(--soft)}}
+.reg>:nth-child(1),.reg>:nth-child(3),.reghead>:nth-child(1),.reghead>:nth-child(3){width:44px;flex:none}
+.reg>:nth-child(2),.reghead>:nth-child(2){flex:1;min-width:0}
+.reg>:nth-child(4),.reghead>:nth-child(4){width:84px;flex:none;text-align:right}
+.btn{display:inline-flex;align-items:center;justify-content:center;height:36px;padding:0 14px;border-radius:10px;border:1px solid var(--line);background:var(--card);color:var(--text);font-size:14px;text-decoration:none;white-space:nowrap}
+.btn.small{height:30px;padding:0 10px;font-size:12px}
+.btn.primary{border-color:transparent;background:var(--primary);color:var(--on-primary);font-weight:500}
+.fld{font-size:12px;color:var(--muted)}
+.fld input{display:block;width:72px;height:36px;margin-top:4px;padding:0 8px;border-radius:8px;border:1px solid var(--line);background:var(--card2);color:var(--text);text-transform:uppercase}
+.fld .err,.errtxt{font-size:12px;color:var(--crit)}
+.logcard{flex:999 1 520px;display:flex;flex-direction:column}
+.toolbar{display:flex;gap:8px;flex-wrap:wrap;align-items:center;padding-bottom:12px}
+.toolbar h2{margin-right:12px}
+.fchip{height:32px;padding:0 10px;border-radius:8px;border:1px solid var(--line);background:transparent;font-size:12px;font-weight:600;color:var(--muted)}
+.fchip[aria-pressed=true]{border-color:transparent;background:var(--soft);color:var(--primary)}
+.search{flex:1 1 140px;min-width:120px;height:36px;padding:0 10px;border-radius:10px;border:1px solid var(--line);background:var(--card2);color:var(--text)}
+.legend{display:flex;flex-wrap:wrap;gap:16px;align-items:center;padding:0 0 10px;font-size:12px;color:var(--muted)}
+.badge{flex:none;padding:1px 6px;border-radius:6px;font-size:11px;font-weight:600;white-space:nowrap}
+.badge.in{background:var(--soft);color:var(--primary)}
+.badge.out{background:var(--card);color:var(--text);border:1px solid var(--line)}
+.logwrap{position:relative;flex:1;display:flex;flex-direction:column;min-height:0}
+.log{flex:1;min-height:520px;max-height:640px;overflow:auto;border-radius:12px;background:var(--card2);padding:4px 0}
+.log .empty{padding:24px;text-align:center;color:var(--muted)}
+.lrow{display:flex;align-items:center;gap:12px;padding:6px 12px;font-size:12px;line-height:18px;border-bottom:1px solid var(--line);cursor:pointer;min-width:0}
+.lrow:hover{background:color-mix(in srgb,var(--text) 5%,transparent)}
+.lrow .t{color:var(--muted)}
+.lrow .what{font-weight:600;width:132px;flex:none}
+.lrow .sum{flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.lrow .code{color:var(--muted)}
+.lrow .chev{color:var(--muted);transition:transform .2s}
+.lrow[aria-expanded=true] .chev{transform:rotate(90deg)}
+.ldet{padding:8px 12px 12px 24px;border-bottom:1px solid var(--line);font-size:12px;background:var(--card)}
+.ldet dl{display:grid;grid-template-columns:auto 1fr;gap:2px 12px;margin:0 0 8px}
+.ldet dt{color:var(--muted)}.ldet dd{margin:0}
+.ldet pre{margin:0 0 8px;white-space:pre-wrap;word-break:break-all;user-select:text}
+.newpill{position:absolute;left:50%;bottom:12px;transform:translateX(-50%);box-shadow:var(--e1)}
+.setup{max-width:720px;margin:0 auto;padding:28px}
+.setup h2{font-size:20px}
+.steps{list-style:none;margin:20px 0 0;padding:0;display:flex;flex-direction:column;gap:20px}
+.steps li{display:flex;gap:14px}
+.num{flex:none;width:28px;height:28px;border-radius:50%;display:flex;align-items:center;justify-content:center;font-size:13px;font-weight:600;background:var(--soft);color:var(--primary)}
+.steps .body{flex:1;min-width:0}
+.steps .t{font-weight:500}
+.code{display:flex;align-items:center;gap:8px;margin-top:8px;padding:8px 8px 8px 12px;border-radius:8px;font-size:13px;background:var(--card2)}
+.code code{flex:1;min-width:0;overflow-x:auto;white-space:nowrap;user-select:all}
+.inputs{display:flex;gap:12px;flex-wrap:wrap;margin-top:8px}
+.inputs label{font-size:12px;color:var(--muted);flex:1 1 160px}
+.inputs input{display:block;width:100%;height:36px;margin-top:4px;padding:0 10px;border-radius:8px;border:1px solid var(--line);background:var(--card2);color:var(--text)}
+details{margin-top:20px;border-top:1px solid var(--line);padding-top:12px}
+summary{cursor:pointer;font-weight:500}
+details ol{margin:8px 0 0;padding-left:20px}
+details li{margin:4px 0}
+.empty-card{text-align:center;max-width:720px;margin:0 auto}
+.empty-card ol{text-align:left;margin:12px auto 16px;padding-left:20px}
+.empty-card li{margin:6px 0}
+@media (max-width:640px){
+  .help{margin-left:0}
+  .label{width:100%}
+  .lrow{flex-wrap:wrap;row-gap:2px}
+  .lrow .what{width:auto}
+  .lrow .sum{flex:1 1 100%;order:9}
+  .logcard,.hero,.card{padding:16px}
+  .big b{font-size:34px}
+  .setup{padding:20px}
+}
+@media (prefers-reduced-motion: reduce){
+  *,*::before,*::after{animation:none!important;transition:none!important}
+}
 </style>
 </head>
 <body>
-<header>
-  <h1>coway-bridge</h1>
-  <label id="picker" class="hide">Device: <select id="dev"></select></label>
-  <span class="sp"></span>
-  <span id="wsi" role="status" aria-live="polite">Offline</span>
-  <span id="relay" class="muted">Relay: off</span>
-</header>
-<div id="banner" class="banner hide" role="status"></div>
-<main id="main">
-  <section class="card hide" id="empty" aria-labelledby="eh" style="grid-column:1/-1">
-    <h2 id="eh">No purifier has connected yet.</h2>
-    <ul><li>NAT redirect of the purifier's traffic to HAOS:9090</li><li>Firewall allows IoT VLAN to HAOS:9090</li><li><code>allowed_macs</code> contains the purifier's MAC (or is empty)</li></ul>
-    <button id="openSetup">Open Setup</button>
-  </section>
-  <div class="col" id="left">
-    <section class="card" id="status" aria-labelledby="sh"><h2 id="sh">Status</h2>
-      <div id="stline"></div>
-      <dl>
-        <dt>MAC</dt><dd id="s-mac">-</dd>
-        <dt>Serial</dt><dd id="s-serial">-</dd>
-        <dt>FW</dt><dd id="s-fw">-</dd>
-        <dt>Last seen</dt><dd id="s-seen">-</dd>
-        <dt>Connected since</dt><dd id="s-since">-</dd>
-        <dt>Upstream</dt><dd id="s-up">-</dd>
-      </dl>
-    </section>
-    <section class="card" id="actions" aria-labelledby="ah"><h2 id="ah">Actions</h2>
-      <div id="offline-reason" class="warn hide">Purifier offline; commands would be dropped.</div>
-      <div class="row"><label>Power</label><button data-cmd='{"type":"power","value":"on"}' data-pr="power:On">On</button><button data-cmd='{"type":"power","value":"off"}' data-pr="power:Off">Off</button></div>
-      <div class="row"><label>Speed</label><button data-cmd='{"type":"speed","value":1}' data-pr="speed:1">1</button><button data-cmd='{"type":"speed","value":2}' data-pr="speed:2">2</button><button data-cmd='{"type":"speed","value":3}' data-pr="speed:3">3</button></div>
-      <div class="row"><label>Light</label><button data-cmd='{"type":"light","value":"on"}' data-pr="light:On">On</button><button data-cmd='{"type":"light","value":"off"}' data-pr="light:Off">Off</button></div>
-      <div class="row"><label for="rr">Raw</label><input id="rr" size="6" maxlength="4" placeholder="reg" pattern="[0-9A-Fa-f]{4}" aria-label="Register (4 hex)"><input id="rv" size="6" maxlength="4" placeholder="val" pattern="[0-9A-Fa-f]{4}" aria-label="Value (4 hex)"><button id="rw">Write</button></div>
-      <div id="rawerr" class="err-in hide">Use 4 hex digits, e.g. 0001</div>
-      <div class="row"><button data-cmd='{"type":"snapshot"}'>Request snapshot</button></div>
-      <div id="result" aria-live="polite" class="muted"></div>
-    </section>
-    <details class="card" id="setup"><summary>Setup (Wi-Fi)</summary>
-      <ol>
-        <li>Hold the purifier's Wi-Fi button until the Wi-Fi LED blinks (pairing mode).</li>
-        <li>Join the open Wi-Fi network <code>Airmega_400s</code> on a laptop.</li>
-        <li>Download the single-file CLI (stdlib only): <code>curl -O https://raw.githubusercontent.com/metril/ha-coway/main/coway_bridge/app/coway_bridge/setup_cli.py</code></li>
-        <li>Enter the serial number from the unit's label (filled in automatically once a unit has connected) and your SSID below, then run the generated command on that laptop. The CLI prompts for the Wi-Fi password.</li>
-        <li>Rejoin your normal Wi-Fi; the purifier should appear here within ~1 min.</li>
-      </ol>
-      <div class="row"><label for="ssid">SSID</label><input id="ssid" autocomplete="off"></div>
-      <div class="row"><label for="serial">Serial</label><input id="serial" autocomplete="off"></div>
-      <pre id="cmd"></pre>
-      <button id="copy">Copy command</button>
-      <p class="muted">The command has no password: the CLI asks for it on the laptop, so it never appears here or in shell history.</p>
-    </details>
-  </div>
-  <div class="col" id="right">
-    <section class="card" id="regs" aria-labelledby="rh"><h2 id="rh">Registers</h2>
-      <div class="tools"><input id="rf" placeholder="filter" aria-label="Filter registers"><label><input type="checkbox" id="unk"> unknown only</label><span id="stale" class="muted hide">stale</span></div>
-      <div class="tw"><table><thead><tr><th scope="col">Reg</th><th scope="col">Name</th><th scope="col">Raw</th><th scope="col">Decoded</th><th scope="col">Updated</th></tr></thead>
-        <tbody class="grp"><tr><th colspan="5" scope="colgroup">Control</th></tr></tbody><tbody id="t-control"></tbody>
-        <tbody class="grp"><tr><th colspan="5" scope="colgroup">Sensors</th></tr></tbody><tbody id="t-sensor"></tbody></table></div>
-      <p id="regempty" class="muted">Waiting for first status report…</p>
-    </section>
-    <section class="card" id="logcard" aria-labelledby="lh"><h2 id="lh">Frame log</h2>
-      <div class="tools">
-        <span class="seg" role="group" aria-label="Direction filter"><button data-dir="P>A" aria-pressed="true">P→A</button><button data-dir="A>P" aria-pressed="true">A→P</button><button data-dir="C>P" aria-pressed="true" class="cloud">C→P</button><button data-dir="P>C" aria-pressed="true" class="cloud">P→C</button></span>
-        <input id="ls" placeholder="search (/)" aria-label="Search frames">
-        <button id="pause">Pause</button><button id="clear">Clear</button><button id="dl">Download</button>
-        <span id="cnt" class="muted">0 / 0</span>
+<div class="page">
+  <header class="appbar">
+    <div class="brand">
+      <svg width="24" height="24" viewBox="0 0 32 32" aria-hidden="true"><rect width="32" height="32" rx="8" fill="#03a9f4"/><path d="M16 16c0-6 3-9 6-8s1 6-6 8zm0 0c6 0 9 3 8 6s-6 1-8-6zm0 0c0 6-3 9-6 8s-1-6 6-8zm0 0c-6 0-9-3-8-6s6-1 8 6z" fill="#fff"/></svg>
+      <h1>Coway Bridge</h1>
+      <select id="devsel" aria-label="Purifier" hidden></select>
+    </div>
+    <div class="pills" id="pills"></div>
+  </header>
+  <div class="rebar" id="rebar" hidden></div>
+  <nav class="tabbar" role="tablist" aria-label="Sections" id="tabs">
+    <button type="button" class="tab" role="tab" id="tab-device" aria-controls="p-device" data-tab="device">Device</button>
+    <button type="button" class="tab" role="tab" id="tab-diagnostics" aria-controls="p-diagnostics" data-tab="diagnostics">Diagnostics</button>
+    <button type="button" class="tab" role="tab" id="tab-setup" aria-controls="p-setup" data-tab="setup">Setup</button>
+  </nav>
+
+  <main>
+    <section id="p-device" role="tabpanel" aria-labelledby="tab-device"></section>
+
+    <section id="p-diagnostics" role="tabpanel" aria-labelledby="tab-diagnostics" hidden>
+      <div class="cols">
+        <div class="sticky">
+          <section class="card" id="d-empty" aria-label="No purifier" hidden></section>
+          <section class="card" id="d-status" aria-label="Status"></section>
+          <section class="card" id="d-conns" aria-label="Connections"></section>
+          <section class="card" id="d-regs" aria-label="Registers">
+            <h2 style="margin-bottom:4px" title="Registers are the purifier's numbered settings and readings. Each has a 4-digit hex address and a hex value.">Registers</h2>
+            <div class="sub">The purifier's raw settings and readings. Tinted rows aren't understood yet.</div>
+            <div class="reghead"><span title="Register address (hex)">Addr</span><span>Meaning</span><span title="Raw value as sent by the purifier (hex)">Raw</span><span>Value</span></div>
+            <div id="regrows"></div>
+          </section>
+          <section class="card" id="d-tools" aria-label="Tools">
+            <h2 style="margin-bottom:12px">Tools</h2>
+            <form id="rawform" novalidate style="display:flex;gap:8px;flex-wrap:wrap;align-items:flex-start">
+              <label class="fld" title="Register address, 4 hex digits (e.g. 0003 = fan speed)">Address<input class="mono" id="rw-reg" maxlength="4" placeholder="0003" autocomplete="off" spellcheck="false" aria-describedby="rw-err"></label>
+              <label class="fld" title="New value, 4 hex digits (e.g. 0002 = speed 2)">Value<input class="mono" id="rw-val" maxlength="4" placeholder="0002" autocomplete="off" spellcheck="false" aria-describedby="rw-err"></label>
+              <button type="submit" class="btn primary" style="margin-top:20px" title="Send this register value straight to the purifier">Write register</button>
+            </form>
+            <div class="errtxt" id="rw-err" role="alert"></div>
+            <div class="sub" style="font-size:12px;margin:8px 0 12px">Advanced: sends the value straight to the purifier. Writing to registers we don't understand yet can misbehave.</div>
+            <button type="button" class="btn" id="snapbtn" title="Ask the purifier to report every register it has (useful when hunting for new ones, e.g. PM2.5)">Read all registers</button>
+            <div class="result" id="toolres" role="status" aria-live="polite"></div>
+          </section>
+        </div>
+        <section class="card logcard" id="logcard" aria-label="Message log">
+          <div class="toolbar">
+            <h2 title="Every message exchanged with the purifier, newest at the bottom. Click a row to see all decoded fields and the raw text.">Message log</h2>
+            <button type="button" class="fchip" id="f-in" aria-pressed="true" title="Show messages the purifier sent to the bridge (reports, acknowledgements)">From purifier</button>
+            <button type="button" class="fchip" id="f-out" aria-pressed="true" title="Show messages the bridge sent to the purifier (polls, commands)">To purifier</button>
+            <button type="button" class="fchip" id="f-cloud" aria-pressed="true" title="Show messages passed between the purifier and Coway's cloud" hidden>Cloud</button>
+            <input class="search" id="q" type="search" placeholder="Search  /" aria-label="Search messages" title="Filter by message type, field or raw text. Press / to jump here.">
+            <button type="button" class="btn" id="pause" title="Freeze the list so you can read it; new messages are held until you resume">Pause</button>
+            <button type="button" class="btn" id="clear" title="Empty the list on this page (doesn't affect the purifier)">Clear</button>
+            <a class="btn" id="dl" href="api/capture" aria-label="Download capture" title="Save every logged message as a capture file for analysis" download>Download</a>
+            <span class="sub" id="count" title="Messages shown / messages kept in memory (max 2000)">0 / 0</span>
+          </div>
+          <div class="legend">
+            <span><span class="badge in mono">← purifier</span> purifier → bridge</span>
+            <span><span class="badge out mono">→ purifier</span> bridge → purifier</span>
+            <span>Polls every 10 s keep the readings fresh.</span>
+          </div>
+          <div class="logwrap">
+            <div class="log" id="log" role="log" aria-live="off" tabindex="0" aria-label="Message list"></div>
+            <button type="button" class="pill newpill" id="newpill" hidden></button>
+          </div>
+        </section>
       </div>
-      <div id="hr" class="muted hide">High frame rate – showing latest 500</div>
-      <div id="log" role="log" aria-live="off" tabindex="0"><div id="logempty" class="muted" style="padding:8px">No frames yet. Frames appear here live.</div><div id="rows"></div></div>
-      <button id="pill" class="hide">new frames ↓</button>
     </section>
-  </div>
-</main>
+
+    <section id="p-setup" role="tabpanel" aria-labelledby="tab-setup" hidden>
+      <section class="card setup" aria-label="Wi-Fi setup">
+        <h2 style="margin-bottom:4px">Wi-Fi setup</h2>
+        <div class="sub">Connect a purifier to your Wi-Fi without the IoCare app.</div>
+        <ol class="steps">
+          <li><span class="num">1</span><div class="body"><div class="t">Put the purifier in Wi-Fi setup mode</div><div class="sub">See the purifier's manual or the IoCare app instructions.</div></div></li>
+          <li><span class="num">2</span><div class="body"><div class="t">Join its setup network from a laptop</div><div class="sub">Connect to the open network the purifier broadcasts (usually named Airmega…).</div></div></li>
+          <li><span class="num">3</span><div class="body"><div class="t">Download the setup tool</div><div class="sub">Python 3, no dependencies.</div>
+            <div class="code"><code class="mono" id="code-curl">curl -O https://raw.githubusercontent.com/metril/ha-coway/main/coway_bridge/app/coway_bridge/setup_cli.py</code><button type="button" class="btn small" data-copy="code-curl">Copy</button></div></div></li>
+          <li><span class="num">4</span><div class="body"><div class="t">Run it</div><div class="sub">Serial is prefilled from the connected purifier; enter your Wi-Fi name.</div>
+            <div class="inputs">
+              <label>Serial number<input class="mono" id="su-serial" autocomplete="off" spellcheck="false" placeholder="from the label on the unit"></label>
+              <label>Wi-Fi name (SSID)<input id="su-ssid" autocomplete="off" spellcheck="false" placeholder="your network name"></label>
+            </div>
+            <div class="code"><code class="mono" id="code-run"></code><button type="button" class="btn small" data-copy="code-run">Copy</button></div></div></li>
+          <li><span class="num">5</span><div class="body"><div class="t">Reconnect your laptop to normal Wi-Fi</div><div class="sub">The purifier should appear on the Device tab within about a minute.</div></div></li>
+        </ol>
+        <div class="sub" style="font-size:12px;margin-top:16px">The tool asks for the Wi-Fi password itself — it is never entered here.</div>
+        <details open>
+          <summary>Purifier not showing up?</summary>
+          <ol>
+            <li>pfSense → Firewall → NAT → Port Forward on the IoT interface: source = purifier IP, destination = any (not a fixed cloud IP), TCP 9090 → Home Assistant IP:9090. DNS overrides do not work: the purifier also asks 8.8.8.8.</li>
+            <li>Allow IoT → Home Assistant:9090 in the firewall rules.</li>
+            <li>Make the purifier reconnect: kill its 9090 state in Diagnostics → States, or deauthenticate it from the Wi-Fi AP. Never unplug it — it loses its Wi-Fi credentials.</li>
+            <li>Check the app log for purifier connect / TLS handshake warnings.</li>
+          </ol>
+        </details>
+      </section>
+    </section>
+  </main>
+</div>
+
 <script>
-(()=>{
 "use strict";
-const $=s=>document.querySelector(s);
-const MAXF=2000,SHOW=500;
-const st={devices:{},bridge:{},sel:null,frames:[],paused:false,held:[],pending:false,newBelow:0,rate:[],ws:null,live:false,retry:0};
-const reduce=matchMedia("(prefers-reduced-motion: reduce)").matches;
-const dirs={"P>A":"P→A","A>P":"A→P","C>P":"C→P","P>C":"P→C"};
-const act={"P>A":true,"A>P":true,"C>P":true,"P>C":true};
-const esc=s=>String(s).replace(/[\u0000-\u001f]/g,c=>c=="\u0002"?"␂":c=="\u0003"?"␃":"·");
-const hm=t=>t?new Date(t).toLocaleTimeString([],{hour12:false}):"-";
-const ago=t=>{if(!t)return"-";const s=Math.max(0,Math.round((Date.now()-new Date(t))/1000));return s<60?s+"s ago":s<3600?Math.floor(s/60)+" min ago":Math.floor(s/3600)+" h ago"};
-const dev=()=>st.devices[st.sel];
+const $ = (s, r = document) => r.querySelector(s);
+const esc = (s) => String(s ?? "").replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
+const pad = (n, w = 2) => String(n).padStart(w, "0");
+const FAN = '<path d="M16 16c0-6 3-9 6-8s1 6-6 8zm0 0c6 0 9 3 8 6s-6 1-8-6zm0 0c0 6-3 9-6 8s-1-6 6-8zm0 0c-6 0-9-3-8-6s6-1 8 6z" fill="currentColor"/>';
 
-function setDevices(list){st.devices={};list.forEach(d=>st.devices[d.mac]=d);const m=Object.keys(st.devices);if(!st.devices[st.sel])st.sel=m[0]||null;renderAll()}
-function upsert(d){st.devices[d.mac]=d;if(!st.sel)st.sel=d.mac;renderAll()}
-function renderAll(){
-  const macs=Object.keys(st.devices),none=!macs.length;
-  $("#empty").classList.toggle("hide",!none);
-  ["#status","#actions","#regs","#logcard"].forEach(s=>$(s).classList.toggle("hide",none));
-  if(none)$("#setup").open=true;
-  $("#picker").classList.toggle("hide",macs.length<2);
-  const sel=$("#dev");sel.innerHTML="";macs.forEach(m=>{const o=document.createElement("option");o.value=o.textContent=m;sel.appendChild(o)});sel.value=st.sel||"";
-  const relayOn=st.bridge.relay_enabled;
-  document.querySelectorAll(".cloud").forEach(b=>b.classList.toggle("hide",!relayOn));
-  renderStatus();renderRegs();renderFrames();
-}
-function renderStatus(){
-  const d=dev(),r=$("#relay"),on=st.bridge.relay_enabled;
-  r.textContent="Relay: "+(!on?"off":(d&&d.upstream.state==="up"?"up":"down"));
-  if(!d){return}
-  const stale=d.last_seen&&(Date.now()-new Date(d.last_seen))>60000;
-  const online=d.online&&!stale;
-  $("#stline").innerHTML=online?'<strong class="ok">● Connected</strong>':'<strong class="err">✕ Disconnected</strong> <span class="muted">– last seen '+ago(d.last_seen)+'</span>';
-  $("#s-mac").textContent=d.mac;$("#s-fw").textContent=d.fw||"-";$("#s-serial").textContent=d.serial||"-";if(d.serial&&!$("#serial").value){$("#serial").value=d.serial;renderCmd()}
-  const ls=$("#s-seen");ls.textContent=ago(d.last_seen);ls.title=d.last_seen||"";
-  $("#s-since").textContent=d.connected_since?hm(d.connected_since):"-";
-  const u=d.upstream||{};let t="-";
-  if(u.state==="disabled")t="-- (relay off)";else if(u.state==="up")t="Up since "+hm(u.since);else if(u.state==="down")t="⚠ Upstream down, local polling. Retry in "+(u.retry_in??"?")+"s."+(u.error?" ("+u.error+")":"");else t="Connecting…";
-  $("#s-up").textContent=t;
-  $("#offline-reason").classList.toggle("hide",online);
-  setBusy(st.pending);
-}
-const rowKey=r=>r.group+r.reg;
-function renderRegs(){
-  const d=dev();["control","sensor"].forEach(g=>$("#t-"+g).innerHTML="");
-  const regs=d?d.registers:[];$("#regempty").classList.toggle("hide",regs.length>0);
-  regs.forEach(r=>putReg(r,false));
-}
-function regVisible(r){const q=$("#rf").value.toLowerCase();if($("#unk").checked&&r.known)return false;return !q||r.reg.toLowerCase().includes(q)||r.name.toLowerCase().includes(q)}
-function putReg(r,flash){
-  const tb=$("#t-"+(r.group==="sensor"?"sensor":"control"));let tr=tb.querySelector('[data-k="'+rowKey(r)+'"]');
-  if(!tr){tr=document.createElement("tr");tr.dataset.k=rowKey(r);tr.innerHTML='<td class="mono"></td><td></td><td class="mono raw"></td><td></td><td></td>';
-    const rows=[...tb.children];const nx=rows.find(x=>x.dataset.k>tr.dataset.k);tb.insertBefore(tr,nx||null)}
-  const c=tr.children,old=c[2].textContent;
-  c[0].textContent=(r.known?"":"! ")+r.reg;c[1].textContent=r.name;c[2].textContent=r.raw;c[3].textContent=r.decoded;c[4].textContent=hm(r.updated);
-  tr.classList.toggle("unk",!r.known);tr.hidden=!regVisible(r);tr._r=r;
-  if(flash&&old&&old!==r.raw&&!reduce&&!st.hi){c[2].classList.add("flash");setTimeout(()=>c[2].classList.remove("flash"),1000)}
-  $("#regempty").classList.add("hide");
-  if(flash)syncActions();
-}
-function syncActions(){
-  const d=dev();if(!d)return;const m={};d.registers.forEach(r=>{if(r.group==="control")m[r.name]=r.decoded});
-  document.querySelectorAll("[data-pr]").forEach(b=>{const[k,v]=b.dataset.pr.split(":");b.setAttribute("aria-pressed",String(m[k]===v))});
-}
-$("#rf").oninput=()=>document.querySelectorAll("#regs tbody tr[data-k]").forEach(tr=>tr.hidden=!regVisible(tr._r));
-$("#unk").onchange=$("#rf").oninput;
+const S = {
+  devices: new Map(), conns: null, bridge: {}, mac: null, tab: null, loaded: false, loadErr: false,
+  live: false, frames: [], ov: {}, owner: {}, busy: {}, inflight: {}, queued: {}, nextCmd: 1,
+  msg: null, // {text, err, retry}
+};
 
-// ---- frames
-function frameVisible(f){
-  if(f.mac!==st.sel||!act[f.dir])return false;
-  const q=$("#ls").value.trim().toLowerCase();if(!q)return true;
-  return esc(f.raw).toLowerCase().includes(q)||(f.summary||"").toLowerCase().includes(q)||(f.cmd||"").toLowerCase().includes(q);
+/* ---------- time helpers ---------- */
+const hhmmss = (iso) => { const d = new Date(iso); return `${pad(d.getHours())}:${pad(d.getMinutes())}:${pad(d.getSeconds())}`; };
+const hhmm = (iso) => hhmmss(iso).slice(0, 5);
+function rel(iso) {
+  if (!iso) return "never";
+  const s = Math.max(0, Math.round((Date.now() - new Date(iso)) / 1000));
+  if (s < 60) return `${s}s ago`;
+  if (s < 3600) return `${Math.floor(s / 60)}m ago`;
+  return hhmm(iso);
 }
-function frameEl(f){
-  const e=document.createElement("div");e.className="fr";e.dataset.d=f.dir;e.dataset.id=f.id;e.tabIndex=0;e.setAttribute("aria-expanded","false");
-  e.innerHTML='<span class="mono"></span><span class="tag mono"></span><span class="raw mono"></span><span class="sum mono"></span>';
-  const c=e.children;c[0].textContent=new Date(f.ts).toLocaleTimeString([],{hour12:false})+"."+String(new Date(f.ts).getMilliseconds()).padStart(3,"0");
-  c[1].textContent=dirs[f.dir];c[2].textContent=esc(f.raw);c[3].textContent=(f.cmd?f.cmd+"  ":"")+(f.summary||"");
-  const tog=()=>{const x=e.classList.toggle("exp");e.setAttribute("aria-expanded",x);
-    if(x){const dd=document.createElement("div");dd.className="detail mono";
-      dd.innerHTML="<div></div><ul></ul><button>Copy raw</button>";dd.firstChild.textContent=esc(f.raw);
-      Object.entries(f.fields||{}).forEach(([k,v])=>{const li=document.createElement("li");li.textContent=k+" = "+v;dd.children[1].appendChild(li)});
-      dd.lastChild.onclick=ev=>{ev.stopPropagation();navigator.clipboard&&navigator.clipboard.writeText(f.raw)};e.appendChild(dd)}
-    else{const dd=e.querySelector(".detail");dd&&dd.remove()}};
-  e.onclick=tog;e.onkeydown=ev=>{if(ev.target===e&&(ev.key==="Enter"||ev.key===" ")){ev.preventDefault();tog()}};
-  return e;
-}
-function renderFrames(){
-  const rows=$("#rows");rows.innerHTML="";
-  const vis=st.frames.filter(frameVisible).slice(-SHOW);const fr=document.createDocumentFragment();vis.forEach(f=>fr.appendChild(frameEl(f)));rows.appendChild(fr);
-  counter();$("#log").scrollTop=$("#log").scrollHeight;
-}
-function counter(){
-  const n=$("#rows").children.length,tot=st.frames.filter(f=>f.mac===st.sel).length;$("#cnt").textContent=n+" / "+tot;
-  const any=st.frames.some(f=>f.mac===st.sel);const le=$("#logempty");
-  if(!any){le.textContent="No frames yet. Frames appear here live.";le.classList.remove("hide")}
-  else if(!n){le.innerHTML="";le.append("No frames match the filter. ");const b=document.createElement("button");b.textContent="Reset filters";b.onclick=resetFilters;le.appendChild(b);le.classList.remove("hide")}
-  else le.classList.add("hide");
-}
-function resetFilters(){Object.keys(act).forEach(k=>act[k]=true);document.querySelectorAll("[data-dir]").forEach(b=>b.setAttribute("aria-pressed","true"));$("#ls").value="";renderFrames()}
-let queue=[],raf=0;
-function enqueue(f){
-  st.frames.push(f);if(st.frames.length>MAXF)st.frames.shift();
-  const now=Date.now();st.rate.push(now);while(st.rate.length&&now-st.rate[0]>2000)st.rate.shift();
-  st.hi=st.rate.length>100;$("#hr").classList.toggle("hide",!st.hi);
-  if(f.dir==="P>A"&&st.devices[f.mac])st.devices[f.mac].last_seen=f.ts;
-  if(st.paused){st.held.push(f);if(st.held.length>MAXF)st.held.shift();$("#pause").textContent="Resume ("+st.held.length+" new)";return}
-  queue.push(f);if(!raf)raf=requestAnimationFrame(flush);
-}
-function flush(){
-  raf=0;const log=$("#log"),stick=log.scrollHeight-log.scrollTop-log.clientHeight<40;
-  const rows=$("#rows"),fr=document.createDocumentFragment();let added=0;
-  queue.forEach(f=>{if(frameVisible(f)){fr.appendChild(frameEl(f));added++}});queue=[];rows.appendChild(fr);
-  while(rows.children.length>SHOW)rows.removeChild(rows.firstChild);
-  counter();
-  if(stick){log.scrollTop=log.scrollHeight;st.newBelow=0;$("#pill").classList.add("hide")}
-  else if(added){st.newBelow+=added;const p=$("#pill");p.textContent=st.newBelow+" new frames ↓";p.classList.remove("hide")}
-}
-$("#pill").onclick=()=>{const l=$("#log");l.scrollTop=l.scrollHeight;st.newBelow=0;$("#pill").classList.add("hide")};
-$("#pause").onclick=togglePause;
-function togglePause(){
-  st.paused=!st.paused;
-  if(!st.paused){const h=st.held;st.held=[];$("#pause").textContent="Pause";h.forEach(f=>{queue.push(f)});if(queue.length&&!raf)raf=requestAnimationFrame(flush)}
-  else $("#pause").textContent="Resume (0 new)";
-}
-let ct=0;
-$("#clear").onclick=()=>{const b=$("#clear");
-  if(!ct){b.textContent="Clear view? Yes / No";ct=setTimeout(()=>{ct=0;b.textContent="Clear"},4000);return}
-  clearTimeout(ct);ct=0;b.textContent="Clear";st.frames=st.frames.filter(f=>f.mac!==st.sel);st.held=[];queue=[];renderFrames()};
-document.querySelectorAll("[data-dir]").forEach(b=>b.onclick=()=>{const k=b.dataset.dir;act[k]=!act[k];b.setAttribute("aria-pressed",String(act[k]));renderFrames()});
-let sd=0;$("#ls").oninput=()=>{clearTimeout(sd);sd=setTimeout(renderFrames,150)};
-$("#dl").onclick=()=>{location.href="api/capture?mac="+encodeURIComponent(st.sel||"")};
-$("#dev").onchange=e=>{st.sel=e.target.value;renderAll()};
-document.addEventListener("keydown",e=>{
-  if(/INPUT|TEXTAREA|SELECT/.test(e.target.tagName)||e.ctrlKey||e.metaKey||e.altKey)return;
-  if(e.key==="p")togglePause();else if(e.key==="/"){e.preventDefault();$("#ls").focus()}});
+const relSpace = (iso) => rel(iso).replace(/^(\d+)([sm]) ago$/, (_, n, u) => `${n} ${u} ago`);
 
-// ---- actions
-let lastBtn=null;
-function setBusy(b){document.querySelectorAll("#actions button").forEach(x=>{x.disabled=b||offline()}),$("#actions").setAttribute("aria-busy",String(b))}
-function offline(){const d=dev();return !d||!d.online}
-async function send(body,label,btn){
-  if(st.pending||!st.sel)return;st.pending=true;lastBtn=btn;
-  const res=$("#result");res.className="muted";res.innerHTML='<span class="spin"></span>Sending…';setBusy(true);
-  const ac=new AbortController();const to=setTimeout(()=>ac.abort(),10500);
-  try{
-    const r=await fetch("api/devices/"+encodeURIComponent(st.sel)+"/command",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify(body),signal:ac.signal});
-    const j=await r.json().catch(()=>({}));
-    if(r.ok&&j.ok){res.className="ok";res.textContent="✓ "+label+" – acked "+hm(j.at);setTimeout(()=>{if(res.className==="ok")res.className="muted"},4000)}
-    else{res.className="err";res.setAttribute("role","alert");res.textContent="Failed: "+(j.error||("HTTP "+r.status))}
-  }catch(e){res.className="err";res.setAttribute("role","alert");res.textContent="Failed: "+(e.name==="AbortError"?"No ack within 10s":e.message)}
-  finally{clearTimeout(to);st.pending=false;setBusy(false);lastBtn&&lastBtn.focus()}
+/* ---------- device model ---------- */
+const dev = () => S.devices.get(S.mac) || null;
+function regRaw(d, group, name) {
+  const r = (d?.registers || []).find((x) => x.group === group && x.name === name);
+  return r ? parseInt(r.raw, 16) : null;
 }
-document.querySelectorAll("[data-cmd]").forEach(b=>b.onclick=()=>{const c=JSON.parse(b.dataset.cmd);send(c,c.type==="snapshot"?"Snapshot":c.type[0].toUpperCase()+c.type.slice(1)+(c.value!==undefined?" "+String(c.value)[0].toUpperCase()+String(c.value).slice(1):""),b)});
-["#rr","#rv"].forEach(s=>$(s).onblur=e=>e.target.value=e.target.value.toUpperCase());
-$("#rw").onclick=()=>{const r=$("#rr").value.toUpperCase(),v=$("#rv").value.toUpperCase(),ok=/^[0-9A-F]{4}$/;
-  const bad=!(ok.test(r)&&ok.test(v));$("#rawerr").classList.toggle("hide",!bad);if(bad)return;send({type:"raw",reg:r,val:v},"Write "+r+"="+v,$("#rw"))};
+const MODES = { 1: "smart", 2: "bedtime" };
+const TIMERS = { 0: "off", 60: "1h", 120: "2h", 240: "4h", 480: "8h" };
+const SENS = { 1: "insensitive", 2: "moderate", 3: "sensitive" };
+function confirmed(d) {
+  const n = (x) => regRaw(d, "control", x);
+  return {
+    power: n("power") == null ? null : !!n("power"),
+    mode: n("mode") == null ? null : MODES[n("mode")] || "manual",
+    speed: n("speed"),
+    light: n("light") == null ? null : n("light") === 2,
+    timer: n("timer") == null ? null : TIMERS[n("timer")] ?? `${n("timer")}m`,
+    sens: n("sensitivity") == null ? null : SENS[n("sensitivity")] ?? null,
+  };
+}
+const view = (d) => ({ ...confirmed(d), ...S.ov });
 
-// ---- setup
-const q1=s=>"'"+String(s).replace(/'/g,"'\\''")+"'";
-function cmdText(){return "python3 setup_cli.py --serial "+q1($("#serial").value)+" --ssid "+q1($("#ssid").value)}
-function renderCmd(){$("#cmd").textContent=cmdText()}
-$("#ssid").oninput=$("#serial").oninput=renderCmd;
-$("#copy").onclick=async e=>{try{await navigator.clipboard.writeText(cmdText());e.target.textContent="Copied";setTimeout(()=>e.target.textContent="Copy command",2000)}catch(_){}};
-$("#openSetup").onclick=()=>{const s=$("#setup");s.open=true;s.scrollIntoView()};
-renderCmd();
+/* ---------- API + optimistic commands ---------- */
+async function post(mac, body) {
+  const ac = new AbortController();
+  const t = setTimeout(() => ac.abort(), 15000);
+  try {
+    const r = await fetch(`api/devices/${mac}/command`, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify(body), signal: ac.signal });
+    let j = {};
+    try { j = await r.json(); } catch { /* non-JSON error page */ }
+    if (!r.ok || !j.ok) throw new Error(j.error || `HTTP ${r.status}`);
+    return j;
+  } catch (e) {
+    throw new Error(e.name === "AbortError" ? "timed out" : e.message);
+  } finally { clearTimeout(t); }
+}
+let msgTimer = 0;
+function setMsg(m) {
+  S.msg = m;
+  clearTimeout(msgTimer);
+  if (m && !m.err) msgTimer = setTimeout(() => { S.msg = null; renderMsg(); }, 6000);
+  renderMsg();
+}
+function renderMsg() {
+  const el = $("#msg");
+  if (!el) return;
+  const m = S.msg;
+  el.className = "result" + (m?.err ? " err" : "");
+  el.setAttribute("role", m?.err ? "alert" : "status");
+  el.innerHTML = m ? esc(m.text) + (m.retry ? ' <button type="button" class="link" data-act="retry">Retry</button>' : "") : "";
+}
+function command(c) {
+  const mac = S.mac;
+  if (!mac) return;
+  c.mac = mac; c.id = S.nextCmd++;
+  for (const [k, v] of Object.entries(c.set)) { S.ov[k] = v; S.owner[k] = c.id; }
+  S.busy[c.ctrl] = true;
+  S.lastCmd = c;
+  if (S.inflight[c.ctrl]) S.queued[c.ctrl] = c; // latest wins
+  else run(c);
+  renderDevice();
+}
+async function run(c) {
+  S.inflight[c.ctrl] = true;
+  let err = null, j = null;
+  try { j = await post(c.mac, c.body); } catch (e) { err = e.message; }
+  delete S.inflight[c.ctrl];
+  const next = S.queued[c.ctrl];
+  if (err) {
+    delete S.queued[c.ctrl];
+    for (const k of Object.keys(c.set)) if (S.owner[k] === c.id || (next && S.owner[k] === next.id)) { delete S.ov[k]; delete S.owner[k]; }
+    delete S.busy[c.ctrl];
+    setMsg({ text: `✕ ${c.what} failed: ${err}. Reverted.`, err: true, retry: c });
+    renderDevice();
+    const row = $(`[data-row="${c.ctrl}"]`);
+    if (row) { row.classList.add("shake"); setTimeout(() => row.classList.remove("shake"), 250); }
+    return;
+  }
+  for (const k of Object.keys(c.set)) if (S.owner[k] === c.id) { delete S.ov[k]; delete S.owner[k]; }
+  if (next) { delete S.queued[c.ctrl]; run(next); }
+  else delete S.busy[c.ctrl];
+  setMsg({ text: `✓ ${c.msg} · acked ${j.at ? hhmmss(j.at) : hhmmss(new Date().toISOString())}` });
+  renderDevice();
+}
+const CMD = {
+  power: (on) => ({ ctrl: "power", what: "Power", msg: `Power ${on ? "on" : "off"}`, body: { type: "power", value: on ? "on" : "off" }, set: { power: on } }),
+  mode: (id, label) => ({ ctrl: "mode", what: "Mode", msg: `Mode set to ${label}`, body: { type: "mode", value: id }, set: { mode: id, power: true } }),
+  speed: (n) => ({ ctrl: "speed", what: "Speed", msg: `Speed set to ${n}`, body: { type: "speed", value: n }, set: { speed: n, mode: "manual", power: true } }),
+  light: (on) => ({ ctrl: "light", what: "Light", msg: `Light ${on ? "on" : "off"}`, body: { type: "light", value: on ? "on" : "off" }, set: { light: on } }),
+  timer: (id, label) => ({ ctrl: "timer", what: "Timer", msg: `Timer set to ${label}`, body: { type: "timer", value: id }, set: { timer: id } }),
+  sens: (id, label) => ({ ctrl: "sens", what: "Sensitivity", msg: `Sensitivity set to ${label}`, body: { type: "sensitivity", value: id }, set: { sens: id } }),
+};
 
-// ---- websocket
-function setLive(s,txt){$("#wsi").textContent=(s?"● ":"✕ ")+txt;$("#wsi").className=s?"ok":"err";document.querySelector("main").classList.toggle("stale",!s&&st.sawLive);$("#stale").classList.toggle("hide",s||!st.sawLive)}
-function connect(){
-  const u=new URL("api/ws",location.href);u.protocol=u.protocol==="https:"?"wss:":"ws:";
-  const ws=new WebSocket(u);st.ws=ws;
-  ws.onopen=()=>{st.retry=0;st.sawLive=true;setLive(true,"Live");$("#banner").classList.add("hide")};
-  ws.onmessage=ev=>{let m;try{m=JSON.parse(ev.data)}catch(_){return}
-    if(m.t==="state"){st.bridge=m.data.bridge;setDevices(m.data.devices);backfill()}
-    else if(m.t==="device")upsert(m.data);
-    else if(m.t==="frame")enqueue(m.data);
-    else if(m.t==="reg"){const d=st.devices[m.data.mac];if(!d)return;const i=d.registers.findIndex(r=>r.group===m.data.group&&r.reg===m.data.reg);if(i<0)d.registers.push(m.data);else d.registers[i]=m.data;if(m.data.mac===st.sel)putReg(m.data,true)}};
-  ws.onclose=()=>{const d=Math.min(30,2**st.retry);st.retry++;setLive(false,"Reconnecting…");
-    const b=$("#banner");b.classList.remove("hide");let n=d;b.textContent="Connection to bridge lost. Retrying in "+n+"s.";
-    const iv=setInterval(()=>{n--;if(n>0)b.textContent="Connection to bridge lost. Retrying in "+n+"s."},1000);
-    setTimeout(()=>{clearInterval(iv);connect()},d*1000)};
-  ws.onerror=()=>ws.close();
+/* ---------- rendering: app bar ---------- */
+function pill(cls, text, title, dot = true, extra = "") {
+  return `<span class="pill ${cls} ${extra}" title="${esc(title)}">${dot ? '<span class="dot"></span>' : ""}${esc(text)}</span>`;
 }
-async function backfill(){
-  try{const r=await fetch("api/frames?limit="+MAXF);const j=await r.json();const seen=new Set(st.frames.map(f=>f.id));
-    st.frames=j.frames.concat(st.frames.filter(f=>!j.frames.some(x=>x.id===f.id)));st.frames=st.frames.slice(-MAXF);void seen;renderFrames()}catch(_){}
+function renderPills() {
+  const out = [];
+  out.push(S.live ? pill("ok", "Live", "This page is receiving live updates from the bridge")
+    : pill("warn", "Reconnecting…", "Lost the live link to the bridge; retrying. Values shown may be stale.", true, "pulse"));
+  const m = S.conns?.mqtt;
+  if (m) {
+    const where = `${m.host}:${m.port}${m.tls ? " over TLS" : " without TLS"}`;
+    const cfg = "Change in the app's Configuration (mqtt_host, mqtt_port, mqtt_tls).";
+    const label = m.tls ? "MQTT · TLS" : "MQTT";
+    if (!m.enabled) out.push(pill("", "MQTT: off", "MQTT is disabled in this run.", false));
+    else if (m.connected) out.push(pill("ok", label, `MQTT: connected to ${where}. ${cfg}`));
+    else if (m.error) out.push(pill("crit", label, `MQTT: not connected to ${where} (${m.error}). ${cfg}`));
+    else out.push(pill("warn", label, `MQTT: connecting to ${where}. ${cfg}`));
+  }
+  const c = S.conns?.cloud;
+  if (c) {
+    const off = "Coway cloud forwarding is off: the purifier is controlled locally only and the IoCare app won't see it. Turn on with the cloud_relay option.";
+    if (!c.enabled) out.push(pill("", "Cloud: off", off, false));
+    else if (c.state === "on") out.push(pill("ok", "Cloud: on", `Coway cloud forwarding is on and connected to ${c.host}.`, false));
+    else if (c.state === "error") out.push(pill("crit", "Cloud: error", `Can't reach ${c.host}${c.error ? ` (${c.error})` : ""}. Local control still works.`, false));
+    else out.push(pill("warn", c.state === "idle" ? "Cloud: on" : "Cloud: connecting", `Coway cloud forwarding is on (${c.host}); waiting for ${c.state === "idle" ? "a purifier" : "the link to Coway"}.`, false));
+  }
+  $("#pills").innerHTML = out.join("");
+  $("#rebar").hidden = S.live;
 }
-setInterval(()=>{renderStatus()},1000);
-setLive(false,"Offline");renderAll();connect();
-})();
+function renderSelect() {
+  const sel = $("#devsel");
+  const macs = [...S.devices.keys()];
+  sel.hidden = macs.length < 2;
+  if (macs.length < 2) return;
+  sel.innerHTML = macs.map((m) => `<option value="${esc(m)}"${m === S.mac ? " selected" : ""}>${esc(m)}</option>`).join("");
+}
+
+/* ---------- rendering: device tab ---------- */
+const bandCls = (b) => ({ Good: "ok", Moderate: "warn", "Unhealthy for sensitive groups": "warn" }[b] || "crit");
+function filterTile(name, used, tip, offAt) {
+  const left = used == null ? null : Math.max(0, Math.min(100, 100 - used));
+  let state = "No data", cls = "";
+  if (left != null) [state, cls] = left < 5 ? ["Replace now", "crit"] : left < 20 ? ["Replace soon", "warn"] : ["Good", "ok"];
+  return `<section class="card tile" aria-label="${esc(name)}">
+    <div class="label" title="${esc(tip)}">${esc(name)}</div>
+    <div class="big"><b>${left == null ? "—" : left + "%"}</b>${left == null ? "" : '<span class="sub">left</span>'}</div>
+    <div class="bar ${cls}" style="--c:var(--${cls || "muted"})" role="img" aria-label="${esc(name)} ${left == null ? "no data" : left + "% remaining"}, ${state}"><div style="width:${left ?? 0}%"></div></div>
+    <span class="pill s ${cls}"><span class="dot"></span>${state}</span>${offAt}</section>`;
+}
+function renderDevice() {
+  const root = $("#p-device");
+  if (S.loadErr) {
+    root.innerHTML = `<div class="card empty-card"><h2 style="font-size:20px">Can't reach the bridge</h2><p class="sub">The page couldn't load its data. Check that the app is running.</p><button type="button" class="btn primary" data-act="reload">Retry</button></div>`;
+    return;
+  }
+  const d = dev();
+  if (!d) { root.innerHTML = S.loaded ? emptyCard() : ""; return; }
+  const focus = document.activeElement?.closest?.("#p-device") ? document.activeElement.dataset.fid : null;
+  const v = view(d);
+  const offline = !d.online;
+  const px = (n) => regRaw(d, "sensor", n);
+  const pm10 = px("pm10"), lux = px("lux");
+  const asOf = offline && d.last_seen ? `<div class="sub" style="font-size:12px">as of ${hhmm(d.last_seen)}</div>` : "";
+  const busy = (c) => (S.busy[c] ? ' aria-busy="true"' : "");
+  const rb = (cls, c, key, cur, items, extra = "") => items.map(([id, label, on = cur === id]) =>
+    `<button type="button" role="radio" class="${cls}" aria-checked="${on}" tabindex="${on || (cur == null && id === items[0][0]) ? 0 : -1}" data-fid="${c}-${id}" data-set="${c}" data-v="${id}" data-l="${esc(label)}"${extra}>${on && cls === "chip" ? "✓ " : ""}${esc(label)}</button>`).join("");
+  const spin = v.mode === "manual" ? { 1: "2.4s", 2: "1.4s", 3: "0.8s" }[v.speed] || "1.8s" : "1.8s";
+  const fanOn = v.power;
+  const row = (c, label, tip, inner) => `<div class="row${S.busy[c] ? " busy" : ""}" data-row="${c}"${busy(c)}><div class="label" title="${esc(tip)}">${label}</div>${inner}</div>`;
+  const aqiTile = `<section class="card tile" aria-label="Air quality">
+    <div class="label" title="AQI is calculated by the bridge from the purifier's PM10 dust sensor (particles up to 10 µm). The purifier itself only reports PM10.">Air quality</div>
+    <div class="big" title="Air Quality Index calculated from PM10 using the US EPA scale (0–50 Good, 51–100 Moderate, 101–150 Unhealthy for sensitive groups, 151+ Unhealthy). Smoothed over a few minutes; EPA's official figure uses a 24-hour average."><b>${d.aqi == null ? "—" : d.aqi}</b><span class="sub">AQI</span></div>
+    ${d.aqi == null ? '<span class="pill s"><span class="dot"></span>No data</span>' : `<span class="pill s ${bandCls(d.aqi_band)}"><span class="dot"></span>${esc(d.aqi_band)}</span>`}
+    <div class="sub" title="Raw dust reading from the purifier's sensor">PM10 · ${pm10 == null ? "—" : pm10 + " µg/m³"}</div>${asOf}</section>`;
+  const luxTile = `<section class="card tile" aria-label="Ambient light">
+    <div class="label" title="Ambient brightness in lux from the purifier's light sensor. Smart mode uses it to dim the display at night.">Light sensor</div>
+    <div class="big"><b>${lux == null ? "—" : lux}</b><span class="sub">lx</span></div>${asOf}</section>`;
+  root.innerHTML = `<div class="cols">
+    <section class="card hero" aria-label="Purifier controls">
+      <div class="hhead">
+        <div><h2>Airmega 400S</h2><div class="sub">Last seen <span class="rel" data-ts="${esc(d.last_seen || "")}">${rel(d.last_seen)}</span>${d.fw ? ` · FW ${esc(d.fw)}` : ""}</div></div>
+        <div class="hctl">
+          ${offline ? '<span class="pill" title="The purifier is not connected to the bridge"><span class="dot"></span>Offline</span>' : '<span class="pill ok" title="The purifier is connected to the bridge"><span class="dot"></span>Online</span>'}
+          <button type="button" class="power" aria-label="Power" title="Power: click to turn the purifier on or off. Blue = on, grey = off." aria-pressed="${!!v.power}" data-fid="power" data-act="power"${offline ? " disabled" : ""}${busy("power")}>
+            <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" aria-hidden="true"><path d="M12 3v8"/><path d="M6.3 6.3a8 8 0 1 0 11.4 0"/></svg><span>${v.power ? "On" : "Off"}</span></button>
+        </div>
+      </div>
+      ${offline ? `<div class="notice" role="status">Purifier offline — controls unavailable. Last seen ${d.last_seen ? `<span class="rel" data-ts="${esc(d.last_seen)}">${rel(d.last_seen)}</span>` : "never"}.</div>` : ""}
+      <div class="rows${v.power === false ? " off" : ""}"${offline ? " inert style=\"opacity:.5\"" : ""}>
+        ${row("mode", "Mode", "Smart: the purifier picks the fan speed from air quality. Bedtime: quiet, lowest speed, dim light. Manual: you pick the speed.",
+          `<div class="seg" role="radiogroup" aria-label="Mode">${rb("", "mode", "mode", v.mode, [["smart", "Smart"], ["bedtime", "Bedtime"], ["manual", "Manual"]])}</div>`)}
+        ${row("speed", "Fan", "Fan speed 1 (low) to 3 (high). The fan icon spins faster at higher speeds.",
+          `<div style="display:flex;align-items:center;gap:12px;flex-wrap:wrap"><svg class="fan${fanOn ? " on" : ""}" style="--spin:${spin}" width="32" height="32" viewBox="0 0 32 32" aria-hidden="true">${FAN}</svg>
+          <div class="seg" role="radiogroup" aria-label="Fan speed">${[1, 2, 3].map((n) => { const on = v.speed === n && v.mode === "manual"; return `<button type="button" role="radio" aria-checked="${on}" tabindex="${on || (v.mode !== "manual" && n === 1) ? 0 : -1}" data-fid="speed-${n}" data-set="speed" data-v="${n}">${n}</button>`; }).join("")}</div></div>`)}
+        <div class="help">Choosing a speed switches to Manual.</div>
+        ${row("light", "Light", "Turns the purifier's front display and air-quality ring light on or off. Doesn't affect purifying.",
+          `<button type="button" role="switch" class="sw" aria-checked="${!!v.light}" aria-label="Display light" data-fid="light" data-act="light"><i></i></button><span>Display light</span>`)}
+        ${row("timer", "Timer", "Turns the purifier off automatically after the chosen time. Off = run until turned off.",
+          `<div class="chips" role="radiogroup" aria-label="Timer">${rb("chip", "timer", "timer", v.timer, [["off", "Off"], ["1h", "1h"], ["2h", "2h"], ["4h", "4h"], ["8h", "8h"]])}</div>`)}
+        ${row("sens", "Sensitivity", "How strongly Smart mode reacts to dust. High = speeds up sooner. (Device terms: insensitive / moderate / sensitive.)",
+          `<div class="chips" role="radiogroup" aria-label="Sensitivity">${rb("chip", "sens", "sens", v.sens, [["insensitive", "Low"], ["moderate", "Medium"], ["sensitive", "High"]])}</div>`)}
+      </div>
+      <div class="result" id="msg" role="status" aria-live="polite"></div>
+    </section>
+    <div class="tiles">
+      ${aqiTile}${luxTile}
+      ${filterTile("Pre-filter", px("prefilter_used"), "Washable mesh that catches hair and large dust. % remaining until the purifier asks for cleaning.", asOf)}
+      ${filterTile("Max2 filter", px("hepa_used"), "Coway's main filter (True HEPA + activated carbon in one). % remaining until it needs replacing, as reported by the purifier.", asOf)}
+    </div></div>`;
+  renderMsg();
+  if (focus) $(`#p-device [data-fid="${focus}"]`)?.focus();
+}
+function emptyCard() {
+  const port = S.bridge.listen_port || 9090;
+  return `<div class="card empty-card"><svg width="64" height="64" viewBox="0 0 32 32" aria-hidden="true" style="color:var(--muted)">${FAN}</svg>
+    <h2 style="font-size:20px;margin-top:8px">No purifier connected yet</h2>
+    <p class="sub">The bridge is listening on port ${esc(port)}. Point the purifier's cloud hostname at Home Assistant:</p>
+    <ol><li>pfSense → Firewall → NAT → Port Forward on the IoT interface: source = purifier IP, destination = any (not a fixed cloud IP), TCP 9090 → Home Assistant IP:9090. DNS overrides do not work: the purifier also asks 8.8.8.8.</li>
+    <li>Allow IoT → Home Assistant:9090 in the firewall rules.</li>
+    <li>Make the purifier reconnect: kill its 9090 state in Diagnostics → States, or deauthenticate it from the Wi-Fi AP. Never unplug it — it loses its Wi-Fi credentials.</li>
+    <li>Check the app log for purifier connect / TLS handshake warnings.</li></ol>
+    <button type="button" class="btn primary" data-act="tab-setup">Wi-Fi setup →</button>
+    <p class="sub">Not on Wi-Fi yet? Use Setup first.</p></div>`;
+}
+
+/* ---------- rendering: diagnostics ---------- */
+function renderDiag() {
+  const d = dev();
+  const has = !!d;
+  for (const id of ["d-status", "d-regs", "d-tools", "logcard"]) $("#" + id).hidden = !has;
+  $("#d-empty").hidden = has || !S.loaded;
+  if (!has) { $("#d-empty").innerHTML = emptyCard(); }
+  if (has) {
+    const rows = [
+      ["Connection", d.online ? "Connected" : "Offline", "Whether the purifier currently has an open link to this bridge."],
+      ["MAC address", d.mac, "The purifier's Wi-Fi hardware address. Used to identify it in Home Assistant."],
+      ["Serial number", d.serial || "—", "The unit's serial (also on its label). Needed for Wi-Fi setup."],
+      ["Firmware", d.fw || "—", "Software version reported by the purifier."],
+      ["Last message", `<span class="rel" data-ts="${esc(d.last_seen || "")}" data-sp="1">${relSpace(d.last_seen)}</span>`, "When the purifier last sent anything. Over 60 s of silence = offline.", true],
+      ["Connected since", d.connected_since ? hhmmss(d.connected_since) : "—", "When the current link was opened."],
+      ["Purifier address", d.peer_ip || "—", "IP address the purifier connected from."],
+    ];
+    $("#d-status").innerHTML = `<h2 style="margin-bottom:12px">Purifier</h2>` + rows.map(([k, val, tip, raw]) =>
+      `<div class="stat" title="${esc(tip)}"><span class="plain">${k}</span><span class="mono" style="font-size:13px">${raw ? val : esc(val)}</span></div>`).join("");
+    renderRegs(d);
+  }
+  renderConns();
+  const dl = $("#dl");
+  dl.href = `api/capture${S.mac ? `?mac=${encodeURIComponent(S.mac)}` : ""}`;
+  $("#f-cloud").hidden = !S.conns?.cloud?.enabled;
+  syncLogUI();
+}
+function renderConns() {
+  const m = S.conns?.mqtt, c = S.conns?.cloud;
+  if (!m || !c) { $("#d-conns").innerHTML = ""; return; }
+  const ms = !m.enabled ? ["Off", ""] : m.connected ? [`Connected · TLS ${m.tls ? "on" : "off"}`, "ok"] : m.error ? ["Not connected", "crit"] : ["Connecting…", "warn"];
+  const cs = { off: ["Off", ""], on: ["On", "ok"], idle: ["On · waiting for purifier", ""], connecting: ["Connecting…", "warn"], error: ["Error", "crit"] }[c.state] || ["Off", ""];
+  const item = (name, st, detail, how, tip) => `<div class="conn" title="${esc(tip)}"><div class="top"><span>${name}</span><span class="pill s ${st[1]}">${esc(st[0])}</span></div><span class="mono sub">${esc(detail)}</span><span class="sub">${esc(how)}</span></div>`;
+  $("#d-conns").innerHTML = `<h2 style="margin-bottom:12px">Connections</h2>` +
+    item("Home Assistant (MQTT)", ms, `${m.host}:${m.port}${m.username ? ` as user ${m.username}` : " (no login)"}${m.error ? ` — ${m.error}` : ""}`,
+      "Change in HA → Settings → Apps → Coway Bridge → Configuration: mqtt_host, mqtt_port, mqtt_tls.",
+      "How the bridge talks to Home Assistant, via your EMQX broker. Turn TLS off (mqtt_tls: false) when the app connects to EMQX locally inside HAOS, e.g. port 1883; keep it on for external hostnames like :8883.") +
+    item("Coway cloud forwarding", cs, `${c.host || "—"}${c.state === "on" ? "" : c.state === "error" && c.error ? ` — ${c.error}` : " (not connected)"}`,
+      "Turn on with cloud_relay: true in the app Configuration. The app restarts to apply.",
+      "Off: fully local; the IoCare app cannot see the purifier. On: the bridge also passes all traffic to Coway so the IoCare app keeps working, while Home Assistant stays in control.");
+}
+let prevRegs = {};
+function renderRegs(d) {
+  const regs = [...(d.registers || [])];
+  const order = (r) => (r.group === "control" ? (r.known ? 0 : 1) : 2);
+  regs.sort((a, b) => order(a) - order(b) || a.reg.localeCompare(b.reg));
+  const key = (r) => `${d.mac}${r.group}${r.reg}`;
+  $("#regrows").innerHTML = regs.map((r) => {
+    const flash = prevRegs[key(r)] != null && prevRegs[key(r)] !== r.raw;
+    return `<div class="reg${r.known ? "" : " unk"}${flash ? " flash" : ""}" title="${esc(r.tip)}"><span class="mono">${esc(r.reg)}</span><span>${esc(r.known ? r.label : "Unknown")}${r.known ? "" : '<span class="sr"> unknown register</span>'}</span><span class="mono">${esc(r.raw)}</span><span>${esc(r.display)}</span></div>`;
+  }).join("");
+  prevRegs = {};
+  for (const r of regs) prevRegs[key(r)] = r.raw;
+}
+
+/* ---------- message log ---------- */
+const LOGMAX_DOM = 500, LOGMAX_MEM = 2000;
+const LF = { in: true, out: true, cloud: true, q: "", paused: false, held: 0, newCount: 0, clearArm: 0 };
+const DIRS = {
+  "P>A": ["in", "← purifier", "Sent by the purifier"],
+  "A>P": ["out", "→ purifier", "Sent by the bridge"],
+  "C>P": ["out", "← cloud", "Sent by the Coway cloud"],
+  "P>C": ["in", "→ cloud", "Passed on to the Coway cloud"],
+};
+function matches(f) {
+  if (S.mac && f.mac !== S.mac) return false;
+  if (f.dir === "P>A" && !LF.in) return false;
+  if (f.dir === "A>P" && !LF.out) return false;
+  if ((f.dir === "C>P" || f.dir === "P>C") && !LF.cloud) return false;
+  if (LF.q) {
+    const hay = `${f.cmd} ${f.title} ${f.summary} ${f.raw} ${Object.entries(f.fields || {}).map(([k, x]) => `${k}=${x}`).join(" ")}`.toLowerCase();
+    if (!hay.includes(LF.q)) return false;
+  }
+  return true;
+}
+function frameTime(iso) { const d = new Date(iso); return `${hhmmss(iso)}.${pad(d.getMilliseconds(), 3)}`; }
+function rowEl(f) {
+  const [kind, label, who] = DIRS[f.dir] || ["in", f.dir, f.dir];
+  const el = document.createElement("div");
+  el.className = "lrow"; el.tabIndex = 0; el.setAttribute("role", "button"); el.setAttribute("aria-expanded", "false");
+  el.dataset.id = f.id;
+  el.title = `${who} · code ${f.code || f.cmd} · click to expand`;
+  el.innerHTML = `<span class="mono t">${frameTime(f.ts)}</span><span class="badge mono ${kind}">${esc(label)}</span><span class="what">${esc(f.title || f.cmd)}</span><span class="sum">${esc(f.summary)}</span><span class="mono code" title="Protocol message code">${esc(f.code || "")}</span><span class="chev" aria-hidden="true">›</span>`;
+  return el;
+}
+function toggleRow(el) {
+  const f = S.frames.find((x) => String(x.id) === el.dataset.id);
+  if (!f) return;
+  const nxt = el.nextElementSibling;
+  if (nxt?.classList.contains("ldet")) { nxt.remove(); el.setAttribute("aria-expanded", "false"); return; }
+  const det = document.createElement("div");
+  det.className = "ldet";
+  const fields = Object.entries(f.fields || {});
+  det.innerHTML = `<dl class="mono">${fields.length ? fields.map(([k, x]) => `<dt>${esc(k)}</dt><dd>${esc(x)}</dd>`).join("") : "<dt>fields</dt><dd>none</dd>"}</dl><pre class="mono">${esc(f.raw)}</pre><button type="button" class="btn small" data-copyraw="${f.id}">Copy raw</button>`;
+  el.after(det);
+  el.setAttribute("aria-expanded", "true");
+}
+const logEl = () => $("#log");
+function stuck() { const l = logEl(); return l.scrollHeight - l.scrollTop - l.clientHeight < 40; }
+function rebuildLog() {
+  const l = logEl();
+  const list = S.frames.filter(matches);
+  l.textContent = "";
+  if (!S.frames.filter((f) => !S.mac || f.mac === S.mac).length) l.innerHTML = '<div class="empty">No messages yet — they appear live as the purifier talks.</div>';
+  else if (!list.length) l.innerHTML = '<div class="empty">No messages match. <button type="button" class="link" data-act="resetf">Reset filters</button></div>';
+  else { const fr = document.createDocumentFragment(); list.slice(-LOGMAX_DOM).forEach((f) => fr.append(rowEl(f))); l.append(fr); }
+  l.scrollTop = l.scrollHeight;
+  LF.newCount = 0; LF.held = 0;
+  syncLogUI();
+}
+function syncLogUI() {
+  const shown = S.frames.filter(matches).length;
+  $("#count").textContent = `${shown} / ${S.frames.length}`;
+  const p = $("#pause");
+  p.textContent = LF.paused ? `Resume · ${LF.held} held` : "Pause";
+  p.setAttribute("aria-pressed", String(LF.paused));
+  for (const [id, k] of [["f-in", "in"], ["f-out", "out"], ["f-cloud", "cloud"]]) $("#" + id).setAttribute("aria-pressed", String(LF[k]));
+  const np = $("#newpill");
+  np.hidden = !LF.newCount;
+  np.textContent = `${LF.newCount} new message${LF.newCount === 1 ? "" : "s"} ↓`;
+  $("#clear").textContent = LF.clearArm ? "Confirm clear" : "Clear";
+}
+function addFrame(f) {
+  S.frames.push(f);
+  if (S.frames.length > LOGMAX_MEM) S.frames.splice(0, S.frames.length - LOGMAX_MEM);
+  if (!matches(f)) { syncLogUI(); return; }
+  if (LF.paused) { LF.held++; syncLogUI(); return; }
+  const l = logEl();
+  const empty = l.querySelector(".empty");
+  if (empty) { l.textContent = ""; }
+  const was = stuck();
+  l.append(rowEl(f));
+  while (l.querySelectorAll(".lrow").length > LOGMAX_DOM) { const first = l.querySelector(".lrow"); if (first.nextElementSibling?.classList.contains("ldet")) first.nextElementSibling.remove(); first.remove(); }
+  if (was) l.scrollTop = l.scrollHeight;
+  else if (S.tab === "diagnostics") LF.newCount++;
+  syncLogUI();
+}
+
+/* ---------- setup tab ---------- */
+let serialDirty = false;
+const shq = (s) => s.replace(/(["\\$`])/g, "\\$1");
+function renderSetup() {
+  const serial = $("#su-serial").value.trim(), ssid = $("#su-ssid").value;
+  $("#code-run").textContent = `python3 setup_cli.py --serial ${serial || "<serial>"} --ssid "${ssid ? shq(ssid) : "<ssid>"}"`;
+}
+function prefillSerial() {
+  const d = dev();
+  if (d?.serial && !serialDirty) { $("#su-serial").value = d.serial; renderSetup(); }
+}
+async function copyText(text, btn) {
+  const old = btn.textContent;
+  try { await navigator.clipboard.writeText(text); }
+  catch {
+    const ta = document.createElement("textarea"); ta.value = text; document.body.append(ta); ta.select();
+    try { document.execCommand("copy"); } catch { /* ignore */ }
+    ta.remove();
+  }
+  btn.textContent = btn.dataset.copyraw ? "Copied" : "Copied";
+  setTimeout(() => { btn.textContent = old; }, 1500);
+}
+
+/* ---------- tabs ---------- */
+const TABS = ["device", "diagnostics", "setup"];
+function showTab(t, push = true) {
+  S.tab = t;
+  for (const id of TABS) {
+    $("#p-" + id).hidden = id !== t;
+    const b = $("#tab-" + id);
+    b.setAttribute("aria-selected", String(id === t));
+    b.tabIndex = id === t ? 0 : -1;
+  }
+  if (push && location.hash !== "#" + t) history.replaceState(null, "", "#" + t);
+  if (t === "diagnostics") { renderDiag(); const l = logEl(); l.scrollTop = l.scrollHeight; LF.newCount = 0; syncLogUI(); }
+}
+
+/* ---------- data + websocket ---------- */
+function applyState(st) {
+  S.bridge = st.bridge || {}; S.conns = st.connections || null;
+  const next = new Map();
+  for (const d of st.devices) next.set(d.mac, d);
+  S.devices = next;
+  if (!next.has(S.mac)) S.mac = next.keys().next().value || null;
+}
+function renderAll() {
+  renderPills(); renderSelect(); renderDevice(); renderDiag(); prefillSerial();
+}
+async function load() {
+  try {
+    const r = await fetch("api/state");
+    if (!r.ok) throw new Error(String(r.status));
+    applyState(await r.json());
+    const fr = await (await fetch(`api/frames?limit=${LOGMAX_MEM}`)).json();
+    S.frames = fr.frames || [];
+    S.loadErr = false;
+  } catch { if (!S.loaded) S.loadErr = true; }
+  const first = !S.loaded;
+  S.loaded = true;
+  if (first) {
+    const h = location.hash.slice(1);
+    showTab(TABS.includes(h) ? h : S.devices.size ? "device" : "setup", false);
+  }
+  renderAll(); rebuildLog();
+}
+let ws, backoff = 1000;
+function connect() {
+  const u = new URL("api/ws", location.href); u.protocol = u.protocol === "https:" ? "wss:" : "ws:";
+  ws = new WebSocket(u);
+  ws.onopen = () => { backoff = 1000; S.live = true; renderPills(); };
+  ws.onmessage = (e) => {
+    const m = JSON.parse(e.data);
+    if (m.t === "state") { applyState(m.data); S.live = true; renderAll(); if (!S.loaded) load(); }
+    else if (m.t === "device") {
+      const had = S.devices.has(m.data.mac);
+      S.devices.set(m.data.mac, m.data);
+      if (!S.mac) S.mac = m.data.mac;
+      if (!had) { renderSelect(); if (S.tab === "setup" && !location.hash) showTab("device"); }
+      if (m.data.mac === S.mac) { schedule(); prefillSerial(); }
+    } else if (m.t === "frame") addFrame(m.data);
+  };
+  ws.onclose = () => {
+    S.live = false; renderPills();
+    setTimeout(async () => { await load(); connect(); }, backoff);
+    backoff = Math.min(backoff * 2, 30000);
+  };
+  ws.onerror = () => ws.close();
+}
+let raf = 0;
+function schedule() {
+  if (raf) return;
+  raf = requestAnimationFrame(() => { raf = 0; renderDevice(); if (S.tab === "diagnostics") renderDiag(); renderPills(); });
+}
+setInterval(() => {
+  for (const el of document.querySelectorAll(".rel")) el.textContent = el.dataset.sp ? relSpace(el.dataset.ts) : rel(el.dataset.ts);
+}, 1000);
+
+/* ---------- events ---------- */
+document.addEventListener("click", (e) => {
+  const t = e.target.closest("button, a, .lrow");
+  if (!t) return;
+  if (t.dataset.tab) return showTab(t.dataset.tab);
+  if (t.classList.contains("lrow")) return toggleRow(t);
+  if (t.dataset.copy) return copyText($("#" + t.dataset.copy).textContent, t);
+  if (t.dataset.copyraw) { const f = S.frames.find((x) => String(x.id) === t.dataset.copyraw); return copyText(f?.raw || "", t); }
+  const d = dev(), v = d ? view(d) : {};
+  if (t.dataset.set) {
+    const k = t.dataset.set, id = t.dataset.v, label = t.dataset.l;
+    if (k === "mode") return command(CMD.mode(id, label));
+    if (k === "speed") return command(CMD.speed(Number(id)));
+    if (k === "timer") return command(CMD.timer(id, label));
+    if (k === "sens") return command(CMD.sens(id, label));
+  }
+  switch (t.dataset.act) {
+    case "power": return command(CMD.power(!v.power));
+    case "light": return command(CMD.light(!v.light));
+    case "retry": { const c = S.msg?.retry; if (c) { S.msg = null; command({ ...c, set: c.set }); } return; }
+    case "reload": S.loadErr = false; S.loaded = false; return load();
+    case "tab-setup": return showTab("setup");
+    case "resetf": LF.in = LF.out = LF.cloud = true; LF.q = ""; $("#q").value = ""; return rebuildLog();
+  }
+  switch (t.id) {
+    case "f-in": case "f-out": case "f-cloud": LF[t.id.slice(2)] = !LF[t.id.slice(2)]; return rebuildLog();
+    case "pause": LF.paused = !LF.paused; if (!LF.paused) rebuildLog(); else syncLogUI(); return;
+    case "clear":
+      if (!LF.clearArm) { LF.clearArm = setTimeout(() => { LF.clearArm = 0; syncLogUI(); }, 3000); return syncLogUI(); }
+      clearTimeout(LF.clearArm); LF.clearArm = 0; S.frames = S.frames.filter((f) => S.mac && f.mac !== S.mac); return rebuildLog();
+    case "newpill": logEl().scrollTop = logEl().scrollHeight; LF.newCount = 0; return syncLogUI();
+    case "snapbtn": return toolCmd({ type: "snapshot" }, "Read all registers");
+  }
+});
+async function toolCmd(body, what) {
+  const el = $("#toolres");
+  if (!S.mac) return;
+  el.className = "result"; el.textContent = "…";
+  try { const j = await post(S.mac, body); el.textContent = `✓ ${what} · acked ${j.at ? hhmmss(j.at) : ""}`; }
+  catch (err) { el.className = "result err"; el.textContent = `✕ ${what} failed: ${err.message}`; }
+}
+$("#rawform").addEventListener("submit", (e) => {
+  e.preventDefault();
+  const reg = $("#rw-reg").value.trim(), val = $("#rw-val").value.trim();
+  const ok = /^[0-9A-Fa-f]{4}$/;
+  const err = $("#rw-err");
+  if (!ok.test(reg) || !ok.test(val)) { err.textContent = "4 hex digits each, e.g. 0003"; return; }
+  err.textContent = "";
+  toolCmd({ type: "raw", reg, val }, `Write ${reg.toUpperCase()} = ${val.toUpperCase()}`);
+});
+for (const id of ["rw-reg", "rw-val"]) $("#" + id).addEventListener("input", (e) => { e.target.value = e.target.value.toUpperCase().replace(/[^0-9A-F]/g, ""); });
+$("#devsel").addEventListener("change", (e) => { S.mac = e.target.value; S.ov = {}; S.owner = {}; renderAll(); rebuildLog(); });
+let qt = 0;
+$("#q").addEventListener("input", (e) => { clearTimeout(qt); qt = setTimeout(() => { LF.q = e.target.value.trim().toLowerCase(); rebuildLog(); }, 150); });
+$("#su-serial").addEventListener("input", () => { serialDirty = true; renderSetup(); });
+$("#su-ssid").addEventListener("input", renderSetup);
+document.addEventListener("keydown", (e) => {
+  const tg = e.target;
+  if (e.key === "/" && !/^(INPUT|TEXTAREA|SELECT)$/.test(tg.tagName) && S.tab === "diagnostics") { e.preventDefault(); $("#q").focus(); return; }
+  if ((e.key === "Enter" || e.key === " ") && tg.classList?.contains("lrow")) { e.preventDefault(); toggleRow(tg); return; }
+  const move = { ArrowRight: 1, ArrowDown: 1, ArrowLeft: -1, ArrowUp: -1 }[e.key];
+  const group = tg.closest?.('[role="radiogroup"], [role="tablist"]');
+  if (group && (move || e.key === "Home" || e.key === "End") && tg.matches('[role="radio"], [role="tab"]')) {
+    e.preventDefault();
+    const items = [...group.querySelectorAll('[role="radio"], [role="tab"]')];
+    let i = items.indexOf(tg);
+    i = e.key === "Home" ? 0 : e.key === "End" ? items.length - 1 : (i + move + items.length) % items.length;
+    items[i].focus();
+    if (group.getAttribute("role") === "tablist") items[i].click(); else items[i].click();
+  }
+});
+window.addEventListener("hashchange", () => { const h = location.hash.slice(1); if (TABS.includes(h) && h !== S.tab) showTab(h, false); });
+
+renderSetup();
+renderPills();
+load().then(() => { connect(); });
 </script>
 </body>
 </html>

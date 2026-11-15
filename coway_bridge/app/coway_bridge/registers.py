@@ -12,6 +12,7 @@ CONTROL_UNKNOWN = (0x000E, 0x0012, 0x0018, 0x0019, 0x0021, 0x0022)
 S_PM10, S_LUX, S_PREFILTER, S_HEPA = 0x0002, 0x0007, 0x0011, 0x0012
 SENSOR_KNOWN = {S_PM10, S_LUX, S_PREFILTER, S_HEPA}
 
+
 LIGHT_ON, LIGHT_OFF = 2, 0
 MODE_NAMES = {1: "smart", 2: "bedtime"}  # anything else -> manual
 PRESETS = ("smart", "bedtime", "manual")

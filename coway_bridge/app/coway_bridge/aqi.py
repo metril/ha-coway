@@ -5,6 +5,8 @@ from __future__ import annotations
 import time
 from collections import deque
 
+from .registers import S_PM10
+
 # (pm_lo, pm_hi, aqi_lo, aqi_hi)
 PM10_BREAKPOINTS = (
     (0, 54, 0, 50),
@@ -62,8 +64,6 @@ class AqiTracker:
         return t
 
     def _on_state(self, mac: str, state: dict) -> None:
-        from .registers import S_PM10
-
         v = state.get("sensor", {}).get(S_PM10)
         if v is not None:
             self.add(mac, v)

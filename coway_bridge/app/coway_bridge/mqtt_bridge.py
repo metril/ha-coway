@@ -16,6 +16,7 @@ import logging
 import ssl
 
 from . import registers as R
+from .aqi import AqiTracker
 from .server import DeviceHub
 
 log = logging.getLogger(__name__)
@@ -34,7 +35,7 @@ def speed_from_percentage(p: int) -> int:
     return 1 if p <= 33 else 2 if p <= 66 else 3
 
 
-def derive_state(dev: dict) -> dict:
+def derive_state(dev: dict, aqi: int | None = None) -> dict:
     """device_state() dict -> flat JSON-able state published to <base>/<mac>/state."""
     c, s = dev.get("control", {}), dev.get("sensor", {})
     out: dict = {}
@@ -52,6 +53,8 @@ def derive_state(dev: dict) -> dict:
         out["timer"] = R.TIMER[c[R.R_TIMER]]
     if R.S_PM10 in s:
         out["pm10"] = s[R.S_PM10]
+    if aqi is not None:
+        out["aqi"] = aqi
     if R.S_LUX in s:
         out["lux"] = s[R.S_LUX]
     if R.S_PREFILTER in s:
@@ -86,24 +89,12 @@ def command_to_writes(entity: str, payload: str, dev: dict) -> dict[int, int] | 
         if not c.get(R.R_POWER):
             w = {R.R_POWER: 1, **w}
         return w
-    if entity == "preset":
-        if p == "smart":
-            return {R.R_MODE: 1}
-        if p == "bedtime":
-            return {R.R_MODE: 2}
-        if p == "manual":  # unit flips to manual when a speed is written
-            return {R.R_SPEED: c.get(R.R_SPEED) or 1}
-        return None
+    if entity in ("preset", "timer", "sensitivity"):
+        return R.writes_for(entity, p, c)
     if entity == "light":
         if p.upper() not in ("ON", "OFF"):
             return None
         return {R.R_LIGHT: R.LIGHT_ON if p.upper() == "ON" else R.LIGHT_OFF}
-    if entity == "sensitivity":
-        inv = {v: k for k, v in R.SENSITIVITY.items()}
-        return {R.R_SENS: inv[p]} if p in inv else None
-    if entity == "timer":
-        inv = {v: k for k, v in R.TIMER.items()}
-        return {R.R_TIMER: inv[p]} if p in inv else None
     return None
 
 
@@ -122,7 +113,7 @@ def discovery_messages(
         "connections": [["mac", ":".join(mac[i : i + 2] for i in range(0, 12, 2)).lower()]],
         "manufacturer": "Coway",
         "model": "AP-2015E",
-        "name": "Coway Airmega 400S",
+        "name": "Airmega 400S",
     }
     if firmware:
         device["sw_version"] = firmware
@@ -138,7 +129,6 @@ def discovery_messages(
         payload = {
             **common,
             "unique_id": f"coway_{did}_{key}",
-            "default_entity_id": f"{platform}.coway_{did}_{key}",
             **payload,
         }
         msgs.append((f"{prefix}/{platform}/coway_{did}/{key}/config", payload))
@@ -147,7 +137,7 @@ def discovery_messages(
         "fan",
         "fan",
         {
-            "name": "Air Purifier",
+            "name": None,  # main entity takes the device name -> fan.airmega_400s
             "state_value_template": "{{ value_json.power }}",
             "command_topic": f"{t}/power/set",
             "percentage_state_topic": f"{t}/state",
@@ -204,9 +194,19 @@ def discovery_messages(
     )
     add(
         "sensor",
+        "aqi",
+        {
+            "name": "AQI",
+            "value_template": "{{ value_json.aqi }}",
+            "device_class": "aqi",
+            "state_class": "measurement",
+        },
+    )
+    add(
+        "sensor",
         "lux",
         {
-            "name": "Illuminance",
+            "name": "Light sensor",
             "value_template": "{{ value_json.lux }}",
             "device_class": "illuminance",
             "unit_of_measurement": "lx",
@@ -217,7 +217,7 @@ def discovery_messages(
         "sensor",
         "prefilter",
         {
-            "name": "Pre-filter remaining",
+            "name": "Pre-filter",
             "value_template": "{{ value_json.prefilter }}",
             "unit_of_measurement": "%",
             "icon": "mdi:air-filter",
@@ -228,7 +228,7 @@ def discovery_messages(
         "sensor",
         "hepa",
         {
-            "name": "HEPA filter remaining",
+            "name": "Max2 filter",
             "value_template": "{{ value_json.hepa }}",
             "unit_of_measurement": "%",
             "icon": "mdi:air-filter",
@@ -270,9 +270,28 @@ class MqttBridge:
         self._stop = asyncio.Event()
         self.retry_delay = 5.0  # initial backoff; doubles per failure up to MAX_RETRY_DELAY
         self._pub_refused: set[str] = set()
+        self._logged_discovery: dict[str, tuple] = {}
         self._firmware: dict[str, str | None] = {}
+        self.aqi = AqiTracker.for_hub(hub)
+        self.connected = False
+        self.error: str | None = None
         hub.add_state_callback(self._on_state)
         hub.add_online_callback(self._on_online)
+
+    def status(self) -> dict:
+        """Connection status for the web UI (never includes the password)."""
+        c = self.cfg
+        return {
+            "host": c.mqtt_host,
+            "port": c.mqtt_port,
+            "tls": bool(c.mqtt_tls),
+            "username": c.mqtt_username or None,
+            "connected": self.connected,
+            "error": self.error,
+        }
+
+    def _state_json(self, mac: str, dev: dict) -> str:
+        return json.dumps(derive_state(dev, self.aqi.aqi(mac)))
 
     def _put(self, topic: str, payload: str, retain: bool = True) -> None:
         try:
@@ -282,17 +301,26 @@ class MqttBridge:
 
     def _publish_discovery(self, mac: str) -> None:
         extra = tuple(sorted(self._extra.get(mac, ())))
-        for topic, payload in discovery_messages(
-            mac, self._firmware.get(mac), extra, self.base, self.prefix
-        ):
+        msgs = discovery_messages(mac, self._firmware.get(mac), extra, self.base, self.prefix)
+        for topic, payload in msgs:
             self._put(topic, json.dumps(payload))
+        key = (mac, tuple(t for t, _ in msgs))
+        if key != self._logged_discovery.get(mac):  # once per (re)connect, not per state change
+            self._logged_discovery[mac] = key
+            log.info(
+                "published discovery for %s: %d configs (%s) under %s/",
+                mac,
+                len(msgs),
+                ", ".join(t.split("/")[-2] for t, _ in msgs),
+                self.prefix,
+            )
 
     def _on_state(self, mac: str, dev: dict) -> None:
         extra = {r for r in dev["sensor"] if r not in R.SENSOR_KNOWN}
         if extra - self._extra.get(mac, set()):
             self._extra.setdefault(mac, set()).update(extra)
             self._publish_discovery(mac)
-        self._put(f"{self.base}/{dev_id(mac)}/state", json.dumps(derive_state(dev)))
+        self._put(f"{self.base}/{dev_id(mac)}/state", self._state_json(mac, dev))
 
     def _on_online(self, mac: str, online: bool, firmware: str | None) -> None:
         if firmware != self._firmware.get(mac) or mac not in self._firmware:
@@ -305,7 +333,7 @@ class MqttBridge:
             dev = self.hub.device_state(mac)
             self._firmware.setdefault(mac, dev["firmware"])
             self._publish_discovery(mac)
-            self._put(f"{self.base}/{dev_id(mac)}/state", json.dumps(derive_state(dev)))
+            self._put(f"{self.base}/{dev_id(mac)}/state", self._state_json(mac, dev))
             self._put(f"{self.base}/{dev_id(mac)}/online", "online" if dev["online"] else "offline")
 
     async def handle_command(self, topic: str, payload: str) -> None:
@@ -415,6 +443,8 @@ class MqttBridge:
                 ) as client:
                     self._hook_puback(client)
                     log.info("mqtt connected")
+                    self.connected, self.error = True, None
+                    self._logged_discovery.clear()
                     while not self._q.empty():
                         self._q.get_nowait()
                     await self._pub(client, f"{self.base}/status", "online")
@@ -430,11 +460,14 @@ class MqttBridge:
                     except* _Stop:
                         stopping = True
                     except* Exception as eg:  # publisher/listener failure: reconnect
+                        self.error = f"session failed: {eg.exceptions[0]!r}"
                         log.warning("mqtt session failed: %s; reconnecting", eg.exceptions)
+                    self.connected = False
                     if stopping:
                         await self._publish_offline(client)  # before the clean disconnect
                         return
             except (aiomqtt.MqttError, SubscribeRefused) as e:
+                self.connected, self.error = False, str(e) or type(e).__name__
                 log.warning("mqtt error: %r; retrying in %gs", e, delay)
             with contextlib.suppress(TimeoutError):
                 await asyncio.wait_for(self._stop.wait(), delay)

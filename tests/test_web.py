@@ -63,7 +63,12 @@ async def test_ws_messages(env):
         kinds.add(m["t"])
         if m["t"] == "frame":
             fr = m["data"]
-            assert fr["dir"] == "P>A" and fr["cmd"] == "A1010RM" and "power=On" in fr["summary"]
+            assert (
+                fr["dir"] == "P>A"
+                and fr["cmd"] == "A1010RM"
+                and fr["title"] == "Settings report"
+                and fr["summary"].startswith("on")
+            )
         if {"frame", "reg", "device"} <= kinds:
             break
     assert {"frame", "reg", "device"} <= kinds
@@ -185,3 +190,126 @@ async def test_cloud_ack_does_not_satisfy_web_wait(tmp_path):
         await relay.stop()
         await hub.stop()
         await up.stop()
+
+
+async def test_new_command_types(env):
+    hub, web, c = env
+    url = f"/api/devices/{MAC}/command"
+    p = await connect(hub, web)
+    sent = []
+
+    async def ack_loop():
+        while True:
+            f = await p.recv()
+            if f is None:
+                return
+            if f.code == "A1011":
+                sent.append(f.regs())
+                p.send("A1011SM0000")
+
+    t = asyncio.create_task(ack_loop())
+    for body, want in [
+        ({"type": "mode", "value": "smart"}, {2: 1}),
+        ({"type": "mode", "value": "bedtime"}, {2: 2}),
+        ({"type": "mode", "value": "manual"}, {3: 1}),
+        ({"type": "timer", "value": "off"}, {8: 0}),
+        ({"type": "timer", "value": "4h"}, {8: 240}),
+        ({"type": "sensitivity", "value": "sensitive"}, {0xA: 3}),
+    ]:
+        sent.clear()
+        r = await c.post(url, json=body)
+        assert r.status == 200, body
+        assert sent == [want], body
+    for bad in [
+        {"type": "mode", "value": "turbo"},
+        {"type": "mode", "value": 1},
+        {"type": "timer", "value": "3h"},
+        {"type": "sensitivity", "value": "x"},
+        {"type": "sensitivity"},
+    ]:
+        assert (await c.post(url, json=bad)).status == 400, bad
+    t.cancel()
+    p.w.close()
+
+
+async def test_state_extras(env):
+    hub, web, c = env
+    s = await (await c.get("/api/state")).json()
+    assert s["connections"]["mqtt"]["enabled"] is False
+    assert s["connections"]["cloud"] == {
+        "enabled": False,
+        "host": None,
+        "state": "off",
+        "error": None,
+    }
+    p = await connect(hub, web)
+    d = (await (await c.get("/api/state")).json())["devices"][0]
+    assert d["peer_ip"] == "127.0.0.1"
+    assert d["aqi"] == 0  # fixture PM10 is 0
+    assert d["aqi_band"] == "Good"
+    regs = {(r["group"], r["reg"]): r for r in d["registers"]}
+    assert regs[("control", "0003")]["label"] == "Fan speed"
+    assert regs[("sensor", "0007")]["display"].endswith(" lx")
+    assert regs[("control", "000E")]["label"] == "Unknown"
+    p.w.close()
+
+
+def test_connections_never_leak_password():
+    from coway_bridge.config import Config
+    from coway_bridge.mqtt_bridge import MqttBridge
+
+    hub = DeviceHub()
+    cfg = Config(
+        mqtt_host="h", mqtt_port=8883, mqtt_tls=True, mqtt_username="u", mqtt_password="secret"
+    )
+    web = WebApp(hub, cfg)
+    web.mqtt = MqttBridge(hub, cfg)
+    conns = web.connections([])
+    assert conns["mqtt"] == {
+        "enabled": True,
+        "host": "h",
+        "port": 8883,
+        "tls": True,
+        "username": "u",
+        "connected": False,
+        "error": None,
+    }
+    assert "secret" not in str(web.snapshot())
+
+
+def _fr(body):
+    return codec.decode_frame(codec.make_frame(HDR, MAC, body))
+
+
+def test_frame_summaries():
+    from coway_bridge.web import summarize
+
+    def s(body):
+        _, summary, _, title, code = summarize(_fr(body))
+        return title, summary, code
+
+    assert s("A1000QMV0.0.0.13") == ("Hello", "firmware 0.0.0.13", "A1000")
+    assert s("A1000SG") == ("Keep-alive", "still there?", "A1000")
+    assert s("A1010SG") == ("Poll settings", "asked for current settings", "A1010")
+    assert s("A1010RM0003000100010002000000030002") == (
+        "Settings report",
+        "on · manual · speed 2",
+        "A1010",
+    )
+    assert s("A1010RM00020007000200080000")[1] == "light on · timer off"
+    assert s("A1010RM0001000A0003")[1] == "high sensitivity"
+    assert s("A1010RM0001000E0001")[1] == "1 other value"
+    assert s("A1011QG00010003" + "0003")[:2] == ("Command", "set fan speed → 3")
+    assert s("A1011QG00020001000100030002")[1] == "turn on, set fan speed → 2"
+    assert s("A1011QG000100080078")[1] == "set timer → 2h"
+    assert s("A1011SM0000")[:2] == ("Acknowledged", "command accepted")
+    assert s("A1012QG") == ("Read all", "asked for every register", "A1012")
+    assert s("A1012SM0001000A0001")[:2] == ("All registers", "1 value")
+    assert s("A1020SG")[:2] == ("Poll sensors", "asked for sensor readings")
+    assert s("A1020RM0004000200000007037E0011006400120014")[1] == (
+        "PM10 0 µg/m³ · 894 lx · pre-filter 0% left · Max2 filter 80% left"
+    )
+    assert s("A9999XX")[0] == "Message A9999"
+    from coway_bridge.web import summarize as sm
+
+    assert sm(None)[3] == "Unreadable message"

@@ -22,6 +22,7 @@ from aiohttp import WSMsgType, web
 
 from . import codec
 from . import registers as R
+from .aqi import AqiTracker, aqi_band
 from .config import normalize_mac
 
 log = logging.getLogger(__name__)
@@ -77,28 +78,156 @@ def decode_reg(group: str, reg: int, val: int) -> tuple[str, str, bool]:
     return f"reg_{reg:04X}", "unknown", False
 
 
-def summarize(frame: codec.Frame | None) -> tuple[str, str, dict]:
+REG_LABELS = {
+    ("control", R.R_POWER): ("Power", "Settings register 0001: power (0 off, 1 on)"),
+    ("control", R.R_MODE): ("Mode", "Settings register 0002: mode (1 smart, 2 bedtime, 0 manual)"),
+    ("control", R.R_SPEED): ("Fan speed", "Settings register 0003: fan speed 1-3"),
+    ("control", R.R_LIGHT): ("Display light", "Settings register 0007: light (0 off, 2 on)"),
+    ("control", R.R_TIMER): ("Off timer", "Settings register 0008: timer in minutes (hex)"),
+    ("control", R.R_SENS): ("Sensitivity", "Settings register 000A: 1 low, 2 medium, 3 high"),
+    ("sensor", R.S_PM10): ("PM10 dust", "Sensor register 0002: PM10 in \u00b5g/m\u00b3"),
+    ("sensor", R.S_LUX): ("Light sensor", "Sensor register 0007: ambient light in lux"),
+    ("sensor", R.S_PREFILTER): ("Pre-filter used", "Sensor register 0011: % of pre-filter used"),
+    ("sensor", R.S_HEPA): ("Max2 filter used", "Sensor register 0012: % of Max2 filter used"),
+}
+SENS_LABEL = {"insensitive": "Low", "moderate": "Medium", "sensitive": "High"}
+
+
+def display_reg(group: str, reg: int, val: int) -> str:
+    """Human value for the register table (units included)."""
+    if group == "control" and reg == R.R_SENS:
+        return SENS_LABEL.get(R.SENSITIVITY.get(val, ""), str(val))
+    if group == "control" and reg == R.R_MODE:
+        return R.MODE_NAMES.get(val, "manual").capitalize()
+    if group == "control" and reg == R.R_TIMER:
+        return {0: "Off"}.get(val) or R.TIMER.get(val, f"{val} min")
+    if group == "control" and reg in CONTROL_NAMES:
+        return decode_reg(group, reg, val)[1]
+    if group == "sensor" and reg == R.S_PM10:
+        return f"{val} \u00b5g/m\u00b3"
+    if group == "sensor" and reg == R.S_LUX:
+        return f"{val} lx"
+    if group == "sensor" and reg in (R.S_PREFILTER, R.S_HEPA):
+        return f"{val}%"
+    return "?"
+
+
+def _on_off(v: int) -> str:
+    return "on" if v else "off"
+
+
+def _control_words(regs: dict[int, int]) -> list[str]:
+    """Settings registers as short phrases, e.g. ['on', 'manual', 'speed 2']."""
+    out: list[str] = []
+    unknown = 0
+    for r, v in regs.items():
+        if r == R.R_POWER:
+            out.append(_on_off(v))
+        elif r == R.R_MODE:
+            out.append(R.MODE_NAMES.get(v, "manual"))
+        elif r == R.R_SPEED:
+            out.append(f"speed {v}")
+        elif r == R.R_LIGHT:
+            out.append(f"light {_on_off(v == R.LIGHT_ON)}")
+        elif r == R.R_TIMER:
+            out.append(f"timer {R.TIMER.get(v, f'{v} min')}")
+        elif r == R.R_SENS:
+            out.append(f"{SENS_LABEL.get(R.SENSITIVITY.get(v, ''), v)} sensitivity".lower())
+        else:
+            unknown += 1
+    if unknown:
+        out.append(f"{unknown} other value{'s' if unknown != 1 else ''}")
+    return out
+
+
+def _command_words(regs: dict[int, int]) -> list[str]:
+    """What a write command asks for, e.g. ['set fan speed \u2192 3']."""
+    out: list[str] = []
+    for r, v in regs.items():
+        if r == R.R_POWER:
+            out.append(f"turn {_on_off(v)}")
+        elif r == R.R_MODE:
+            out.append(f"set mode \u2192 {R.MODE_NAMES.get(v, 'manual')}")
+        elif r == R.R_SPEED:
+            out.append(f"set fan speed \u2192 {v}")
+        elif r == R.R_LIGHT:
+            out.append(f"set light \u2192 {_on_off(v == R.LIGHT_ON)}")
+        elif r == R.R_TIMER:
+            out.append(f"set timer \u2192 {R.TIMER.get(v, f'{v} min')}")
+        elif r == R.R_SENS:
+            out.append(
+                f"set sensitivity \u2192 {SENS_LABEL.get(R.SENSITIVITY.get(v, ''), v).lower()}"
+            )
+        else:
+            out.append(f"write register {r:04X} \u2192 {v:04X}")
+    return out
+
+
+def _sensor_words(regs: dict[int, int]) -> list[str]:
+    out: list[str] = []
+    for r, v in regs.items():
+        if r == R.S_PM10:
+            out.append(f"PM10 {v} \u00b5g/m\u00b3")
+        elif r == R.S_LUX:
+            out.append(f"{v} lx")
+        elif r == R.S_PREFILTER:
+            out.append(f"pre-filter {max(0, 100 - v)}% left")
+        elif r == R.S_HEPA:
+            out.append(f"Max2 filter {max(0, 100 - v)}% left")
+        else:
+            out.append(f"sensor {r:04X}={v:04X}")
+    return out
+
+
+def describe(frame: codec.Frame) -> tuple[str, str]:
+    """(title, summary): plain-language description of a frame for the message log."""
+    code, verb = frame.code, frame.verb
+    try:
+        regs = frame.regs() if verb in ("RM", "SM", "QG") else {}
+    except codec.FrameError:
+        regs = {}
+    if code == "A1000":
+        if verb == "QM":
+            return "Hello", f"firmware {frame.data.lstrip('V')}"
+        if verb == "SG":
+            return "Keep-alive", "still there?"
+    if code == "A1010":
+        if verb == "SG":
+            return "Poll settings", "asked for current settings"
+        if verb == "RM":
+            return "Settings report", " \u00b7 ".join(_control_words(regs)) or "no changes"
+    if code == "A1011":
+        if verb == "QG":
+            return "Command", ", ".join(_command_words(regs)) or "write"
+        if verb == "SM":
+            return "Acknowledged", "command accepted"
+    if code == "A1012":
+        if verb == "QG":
+            return "Read all", "asked for every register"
+        if verb == "SM":
+            n = len(regs)
+            return "All registers", f"{n} value{'s' if n != 1 else ''}"
+    if code == "A1020":
+        if verb == "SG":
+            return "Poll sensors", "asked for sensor readings"
+        if verb == "RM":
+            return "Sensor report", " \u00b7 ".join(_sensor_words(regs)) or "no data"
+    return f"Message {code}", verb
+
+
+def summarize(frame: codec.Frame | None) -> tuple[str, str, dict, str, str]:
+    """-> (cmd, summary, fields, title, code). `fields` maps register hex -> value hex."""
     if frame is None:
-        return "", "undecodable", {}
-    cmd = frame.body[:7]
+        return "", "couldn't decode this message", {}, "Unreadable message", ""
     fields: dict[str, str] = {}
-    parts: list[str] = []
-    ch = R.CODE_CHANNEL.get(frame.code)
-    if frame.verb in ("RM", "SM", "QG") and (ch or frame.code == "A1011"):
+    if frame.verb in ("RM", "SM", "QG"):
         try:
-            regs = frame.regs()
+            for r, v in frame.regs().items():
+                fields[f"{r:04X}"] = f"{v:04X}"
         except codec.FrameError:
-            regs = {}
-        group = "sensor" if ch == "sensor" else "control"
-        for r, v in regs.items():
-            fields[f"{r:04X}"] = f"{v:04X}"
-            n, d, known = decode_reg(group, r, v)
-            parts.append(f"{n}={d}" if known else f"{n}={v:04X}")
-    elif frame.code == "A1000" and frame.verb == "QM":
-        parts.append(f"fw={frame.data.lstrip('V')}")
-    elif not parts and frame.verb == "SG":
-        parts.append("poll")
-    return cmd, " ".join(parts), fields
+            pass
+    title, summary = describe(frame)
+    return frame.body[:7], summary, fields, title, frame.code
 
 
 class WebApp:
@@ -110,13 +239,17 @@ class WebApp:
         ack_timeout: float = 10.0,
         ring: int = RING,
         enforce_ingress: bool | None = None,
+        mqtt=None,
     ):
         self.hub, self.cfg, self.relay, self.ack_timeout = hub, cfg, relay, ack_timeout
+        self.mqtt = mqtt
+        self.aqi = AqiTracker.for_hub(hub)  # before our own state callback: sample first
         # under HAOS only the Supervisor ingress proxy may reach the UI
         self.enforce_ingress = (
             bool(os.environ.get("SUPERVISOR_TOKEN")) if enforce_ingress is None else enforce_ingress
         )
         self._serials: dict[str, str] = {}
+        self._peers: dict[str, str] = {}
         self.frames: deque[dict] = deque(maxlen=ring)
         self._raw: dict[int, bytes] = {}
         self._next_id = 1
@@ -142,12 +275,18 @@ class WebApp:
         st = self.hub.device_state(mac)
         regs = sorted(self._regs.get(mac, {}).values(), key=lambda r: (r["group"], r["reg"]))
         ls = st["last_seen"]
+        aqi = self.aqi.aqi(mac)
         s = self.hub.session(mac)
         if s is not None:
             self._serials[mac] = s.serial
+            if s.peer_ip:
+                self._peers[mac] = s.peer_ip
         return {
             "mac": mac,
             "serial": self._serials.get(mac),
+            "peer_ip": self._peers.get(mac),
+            "aqi": aqi,
+            "aqi_band": aqi_band(aqi),
             "fw": st["firmware"],
             "online": bool(st["online"]) and ls is not None and time.time() - ls < ONLINE_WINDOW,
             "last_seen": iso(ls) if ls else None,
@@ -156,10 +295,58 @@ class WebApp:
             "registers": regs,
         }
 
+    def connections(self, macs: list[str]) -> dict:
+        """MQTT and Coway-cloud connection status (never includes passwords)."""
+        c = self.cfg
+        if self.mqtt is not None:
+            mqtt = {"enabled": True, **self.mqtt.status()}
+        else:
+            mqtt = {
+                "enabled": False,
+                "host": c.mqtt_host if c else None,
+                "port": c.mqtt_port if c else None,
+                "tls": bool(c.mqtt_tls) if c else False,
+                "username": (c.mqtt_username or None) if c else None,
+                "connected": False,
+                "error": None,
+            }
+        if self.relay is None:
+            cloud = {
+                "enabled": False,
+                "host": c.cloud_host if c else None,
+                "state": "off",
+                "error": None,
+            }
+        else:
+            ups = [self.relay.upstream_status(m) for m in macs]
+            states = {u["state"] for u in ups}
+            state = (
+                "idle"
+                if not ups
+                else "on"
+                if "up" in states
+                else "error"
+                if "down" in states
+                else "connecting"
+            )
+            cloud = {
+                "enabled": True,
+                "host": f"{self.relay.host}:{self.relay.port}",
+                "state": state,
+                "error": next((u["error"] for u in ups if u.get("error")), None),
+            }
+        return {"mqtt": mqtt, "cloud": cloud}
+
     def snapshot(self) -> dict:
+        macs = self.hub.macs()
         return {
-            "bridge": {"version": _ver(), "relay_enabled": self.relay is not None},
-            "devices": [self.device(m) for m in self.hub.macs()],
+            "bridge": {
+                "version": _ver(),
+                "relay_enabled": self.relay is not None,
+                "listen_port": self.hub.port,
+            },
+            "connections": self.connections(macs),
+            "devices": [self.device(m) for m in macs],
         }
 
     # --- hub hooks ---------------------------------------------------------------
@@ -175,7 +362,7 @@ class WebApp:
                 q.put_nowait(None)
 
     def _on_frame(self, mac: str, direction: str, raw: bytes, decoded) -> None:
-        cmd, summary, fields = summarize(decoded)
+        cmd, summary, fields, title, code = summarize(decoded)
         f = {
             "id": self._next_id,
             "mac": mac,
@@ -183,6 +370,8 @@ class WebApp:
             "dir": direction,
             "raw": raw.decode("latin-1"),
             "cmd": cmd,
+            "code": code,
+            "title": title,
             "summary": summary,
             "fields": fields,
         }
@@ -221,6 +410,15 @@ class WebApp:
                     "group": group,
                     "raw": raw,
                     "decoded": dec,
+                    "label": REG_LABELS.get((group, reg), ("Unknown", ""))[0],
+                    "tip": REG_LABELS.get(
+                        (group, reg),
+                        (
+                            "",
+                            "Not decoded yet. Watch it change in the log to work out what it means.",
+                        ),
+                    )[1],
+                    "display": display_reg(group, reg, val),
                     "known": known,
                     "updated": now,
                 }
@@ -349,6 +547,9 @@ class WebApp:
             return t, w, None
         if t == "light" and v in ("on", "off"):
             return t, {R.R_LIGHT: R.LIGHT_ON if v == "on" else R.LIGHT_OFF}, None
+        if t in ("mode", "timer", "sensitivity"):
+            w = R.writes_for(t, v, ctl) if isinstance(v, str) else None
+            return (t, w, None) if w else (t, None, "invalid command")
         if t == "raw":
             reg, val = body.get("reg"), body.get("val")
             if (

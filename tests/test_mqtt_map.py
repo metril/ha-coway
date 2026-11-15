@@ -66,11 +66,15 @@ def test_discovery():
     ids = [p["unique_id"] for _, p in msgs]
     assert len(ids) == len(set(ids))
     fan = dict(msgs)["homeassistant/fan/coway_0008dc000001/fan/config"]
-    assert fan["default_entity_id"] == "fan.coway_0008dc000001_fan"
+    assert fan["name"] is None
     assert all("object_id" not in p for _, p in msgs)
     assert fan["preset_modes"] == ["smart", "bedtime", "manual"]
     d = fan["device"]
     assert (d["manufacturer"], d["model"], d["sw_version"]) == ("Coway", "AP-2015E", "0.0.0.13")
+    assert d["name"] == "Airmega 400S" and d["identifiers"] == ["coway_0008dc000001"]
+    assert fan["unique_id"] == "coway_0008dc000001_fan"
+    assert all("default_entity_id" not in p and "object_id" not in p for _, p in msgs)
+    assert "Coway" not in " ".join(p["name"] or "" for _, p in msgs)
     assert d["connections"] == [["mac", "00:08:dc:00:00:01"]]
     assert fan["availability_mode"] == "all" and len(fan["availability"]) == 2
     diag = dict(msgs)["homeassistant/sensor/coway_0008dc000001/reg_000E/config"]
@@ -247,3 +251,46 @@ async def test_puback_refused_via_paho_hook_logs_acl_error_once(fake_mqtt, caplo
     mine = [x for x in msgs if "coway_bridge/x/state" in x]
     assert len(mine) == 1
     assert "check broker ACL for user 'coway'" in mine[0]
+
+
+def test_aqi_and_names():
+    assert m.derive_state({"control": {}, "sensor": {2: 12}}, aqi=11)["aqi"] == 11
+    assert "aqi" not in m.derive_state({"control": {}, "sensor": {2: 12}})
+    msgs = {t.split("/")[-2]: p for t, p in m.discovery_messages(MAC)}
+    assert msgs["aqi"]["name"] == "AQI" and msgs["aqi"]["device_class"] == "aqi"
+    assert "unit_of_measurement" not in msgs["aqi"]
+    assert msgs["aqi"]["unique_id"] == f"coway_{MAC.lower()}_aqi"
+    assert msgs["lux"]["name"] == "Light sensor" and msgs["lux"]["unit_of_measurement"] == "lx"
+    assert msgs["prefilter"]["name"] == "Pre-filter" and msgs["hepa"]["name"] == "Max2 filter"
+    assert msgs["hepa"]["unique_id"] == f"coway_{MAC.lower()}_hepa"
+
+
+def test_writes_for_shared():
+    from coway_bridge import registers as R
+
+    off = {1: 0, 3: 2}
+    assert R.writes_for("mode", "smart", off) == {1: 1, 2: 1}
+    assert R.writes_for("preset", "manual", off) == {1: 1, 3: 2}
+    assert R.writes_for("mode", "manual", {1: 1}) == {3: 1}
+    assert R.writes_for("mode", "x", off) is None
+    assert R.writes_for("timer", "8h", off) == {8: 480} and R.writes_for("timer", "9h", off) is None
+    assert R.writes_for("sensitivity", "moderate", off) == {0xA: 2}
+    assert R.writes_for("bogus", "x", off) is None
+
+
+async def test_discovery_summary_logged_once_per_connect(fake_mqtt, caplog):
+    import logging
+
+    caplog.set_level(logging.INFO)
+    b = _bridge()
+    task = asyncio.create_task(b.run())
+    await asyncio.sleep(0.3)
+    b._on_state(MAC, b.hub.device_state(MAC))  # repeated state must not re-log
+    b._on_state(MAC, b.hub.device_state(MAC))
+    await asyncio.sleep(0.1)
+    b.request_stop()
+    await asyncio.wait_for(task, 3)
+    lines = [r.getMessage() for r in caplog.records if "published discovery" in r.getMessage()]
+    assert len(lines) == 1
+    assert MAC in lines[0] and "configs (fan, light, sensitivity, timer, pm10, aqi" in lines[0]
+    assert "homeassistant/" in lines[0]

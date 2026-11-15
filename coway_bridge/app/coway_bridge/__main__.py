@@ -47,8 +47,9 @@ class App:
         self.listen_port = listen_port if listen_port is not None else cfg.listen_port
         self.hub = DeviceHub(cfg.allowed_macs)
         self.relay = Relay(self.hub, cfg.cloud_host) if cfg.cloud_relay else None
-        self.web = WebApp(self.hub, cfg, self.relay)
+        self.web = WebApp(self.hub, cfg, self.relay)  # first: registers the shared AQI sampler
         self.bridge = MqttBridge(self.hub, cfg) if mqtt else None
+        self.web.mqtt = self.bridge
         self._runner = None
         self._mqtt_task: asyncio.Task | None = None
         self.web_port: int | None = None
