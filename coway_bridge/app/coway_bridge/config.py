@@ -17,6 +17,7 @@ class Config:
     mqtt_password: str = ""
     mqtt_tls: bool = False
     ingress_port: int = 8099
+    listen_port: int = 9090  # remap the host port in the app's Network UI
     allowed_macs: list[str] = field(default_factory=list)
     cloud_relay: bool = False
     cloud_host: str = "iocgwo.coway.co.kr:9090"

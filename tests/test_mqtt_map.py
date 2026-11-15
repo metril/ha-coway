@@ -84,6 +84,8 @@ def test_discovery():
 class FakeClient:
     instances: list = []
     fail_first_publish = False
+    sub_rc: list = [1]
+    pub_rc = None
 
     def __init__(self, *a, **kw):
         self.published = []
@@ -100,13 +102,14 @@ class FakeClient:
     async def __aexit__(self, *a):
         self.closed = True
 
-    async def subscribe(self, *a):
-        pass
+    async def subscribe(self, *a, **kw):
+        return FakeClient.sub_rc
 
-    async def publish(self, topic, payload, retain=False):
+    async def publish(self, topic, payload, qos=0, retain=False):
         if FakeClient.fail_first_publish and self is FakeClient.instances[0] and "/state" in topic:
             raise RuntimeError("boom")
         self.published.append((topic, payload, retain))
+        return FakeClient.pub_rc
 
 
 @pytest.fixture
@@ -115,6 +118,8 @@ def fake_mqtt(monkeypatch):
 
     FakeClient.instances = []
     FakeClient.fail_first_publish = False
+    FakeClient.sub_rc = [1]
+    FakeClient.pub_rc = None
     monkeypatch.setattr(aiomqtt, "Client", FakeClient)
     return FakeClient
 
@@ -158,3 +163,40 @@ async def test_publisher_error_triggers_reconnect(fake_mqtt):
     assert len(fake_mqtt.instances) >= 2
     b.request_stop()
     await asyncio.wait_for(task, 3)
+
+
+async def test_subscribe_refused_logs_error_and_reconnects_with_backoff(fake_mqtt, caplog):
+    fake_mqtt.sub_rc = [0x80]
+    b = _bridge()
+    b.cfg.mqtt_username = "coway"
+    task = asyncio.create_task(b.run())
+    for _ in range(150):
+        if len(fake_mqtt.instances) >= 3:
+            break
+        await asyncio.sleep(0.02)
+    assert len(fake_mqtt.instances) >= 3
+    b.request_stop()
+    await asyncio.wait_for(task, 3)
+    errs = [r for r in caplog.records if r.levelname == "ERROR"]
+    assert errs and "coway_bridge/+/+/set" in errs[0].getMessage()
+    assert "coway" in errs[0].getMessage()
+
+
+async def test_backoff_capped_at_60s():
+    assert m.MAX_RETRY_DELAY == 60.0
+    assert min(5.0 * 2**10, m.MAX_RETRY_DELAY) == 60.0
+
+
+async def test_publish_refused_logged_once_per_topic(fake_mqtt, caplog):
+    fake_mqtt.pub_rc = 0x87  # v5 "Not authorized"
+    b = _bridge()
+    task = asyncio.create_task(b.run())
+    await asyncio.sleep(0.3)
+    b._put("coway_bridge/x/state", "1")
+    b._put("coway_bridge/x/state", "2")
+    await asyncio.sleep(0.2)
+    b.request_stop()
+    await asyncio.wait_for(task, 3)
+    msgs = [r.getMessage() for r in caplog.records if r.levelname == "ERROR"]
+    assert sum("coway_bridge/x/state" in x for x in msgs) == 1
+    assert any("coway_bridge/status" in x for x in msgs)

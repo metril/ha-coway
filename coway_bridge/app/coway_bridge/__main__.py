@@ -7,6 +7,7 @@ import asyncio
 import contextlib
 import logging
 import logging.handlers
+import os
 import signal
 from pathlib import Path
 
@@ -17,7 +18,6 @@ from .server import DeviceHub, build_ssl_context, ensure_cert
 from .web import WebApp, bound_port, start_web
 
 log = logging.getLogger(__name__)
-LISTEN_PORT = 9090  # fixed inside the container; remap the host port in the app's Network UI
 
 
 def _frame_logger(data_dir: str):
@@ -38,10 +38,10 @@ def _frame_logger(data_dir: str):
 
 class App:
     def __init__(
-        self, cfg, mqtt: bool = True, web_host: str = "0.0.0.0", listen_port: int = LISTEN_PORT
+        self, cfg, mqtt: bool = True, web_host: str = "0.0.0.0", listen_port: int | None = None
     ):
         self.cfg, self.use_mqtt, self.web_host = cfg, mqtt, web_host
-        self.listen_port = listen_port
+        self.listen_port = listen_port if listen_port is not None else cfg.listen_port
         self.hub = DeviceHub(cfg.allowed_macs)
         self.relay = Relay(self.hub, cfg.cloud_host) if cfg.cloud_relay else None
         self.web = WebApp(self.hub, cfg, self.relay)
@@ -63,19 +63,26 @@ class App:
             self._mqtt_task = asyncio.create_task(self.bridge.run())
 
     async def stop(self) -> None:
+        """Shut everything down, each step bounded so SIGTERM exits within a few seconds."""
+
+        async def bounded(coro, t: float) -> None:
+            try:
+                await asyncio.wait_for(coro, t)
+            except Exception as e:  # incl. TimeoutError
+                log.warning("shutdown step timed out or failed: %r", e)
+
         if self._mqtt_task:
             # clean shutdown: bridge publishes retained offline topics, then disconnects
             self.bridge.request_stop()
-            try:
-                await asyncio.wait_for(asyncio.shield(self._mqtt_task), 5)
-            except (TimeoutError, Exception):
+            await asyncio.wait({self._mqtt_task}, timeout=2)
+            if not self._mqtt_task.done():
                 self._mqtt_task.cancel()
-            await asyncio.gather(self._mqtt_task, return_exceptions=True)
+                await asyncio.wait({self._mqtt_task}, timeout=1)
         if self.relay:
-            await self.relay.stop()
+            await bounded(self.relay.stop(), 2)
         if self._runner:
-            await self._runner.cleanup()
-        await self.hub.stop()
+            await bounded(self._runner.cleanup(), 2)
+        await bounded(self.hub.stop(), 4)
 
 
 async def amain(cfg) -> None:
@@ -103,6 +110,7 @@ def main(argv: list[str] | None = None) -> None:
     p.add_argument("--config", default="/data/options.json")
     p.add_argument("--data-dir")
     p.add_argument("--ingress-port", type=int)
+    p.add_argument("--listen-port", type=int)
     p.add_argument("--mqtt-host")
     p.add_argument("--mqtt-port", type=int)
     p.add_argument("--log-level")
@@ -112,6 +120,8 @@ def main(argv: list[str] | None = None) -> None:
     logging.basicConfig(level=cfg.log_level.upper(), format="%(asctime)s %(name)s %(message)s")
     with contextlib.suppress(KeyboardInterrupt):
         asyncio.run(amain(cfg))
+    logging.shutdown()
+    os._exit(0)  # skip interpreter teardown: a stuck resolver thread must not block exit
 
 
 if __name__ == "__main__":

@@ -26,11 +26,11 @@ from __future__ import annotations
 
 import asyncio
 import contextlib
-import datetime as dt
 import inspect
 import logging
 import os
 import ssl
+import subprocess
 import time
 from collections.abc import Callable
 from pathlib import Path
@@ -43,53 +43,46 @@ LIVE_WINDOW = 30.0  # a session with a frame this recent is considered live
 POLLS = ("A1000", "A1010", "A1020")
 
 
+CERT_SUBJECT = "/C=KR/ST=Seoul/L=Seoul/O=COWAY/OU=SW Dev Unit/CN=Coway_iTrust"
+
+
+def _is_sha1_cert(path: Path) -> bool:
+    from cryptography import x509
+    from cryptography.hazmat.primitives import hashes
+
+    try:
+        c = x509.load_pem_x509_certificate(path.read_bytes())
+        return isinstance(c.signature_hash_algorithm, hashes.SHA1)
+    except Exception:
+        return False
+
+
 def ensure_cert(data_dir: str | os.PathLike) -> tuple[str, str]:
-    """Return (cert, key) paths, generating a self-signed Coway-lookalike cert if missing."""
+    """Return (cert, key) paths; generate a SHA1-signed self-signed Coway-lookalike cert if needed.
+
+    The purifier's old TLS stack drops the connection on SHA256-signed certs, so SHA1 is
+    mandatory; it is produced with the openssl CLI (python-cryptography refuses SHA1 signing).
+    """
     d = Path(data_dir)
     d.mkdir(parents=True, exist_ok=True)
     cert, key = d / "coway.pem", d / "coway.key"
     if cert.exists() and key.exists():
-        return str(cert), str(key)
-    from cryptography import x509
-    from cryptography.exceptions import UnsupportedAlgorithm
-    from cryptography.hazmat.primitives import hashes, serialization
-    from cryptography.hazmat.primitives.asymmetric import rsa
-    from cryptography.x509.oid import NameOID as N
-
-    k = rsa.generate_private_key(public_exponent=65537, key_size=2048)
-    name = x509.Name(
-        [
-            x509.NameAttribute(N.COUNTRY_NAME, "KR"),
-            x509.NameAttribute(N.STATE_OR_PROVINCE_NAME, "Seoul"),
-            x509.NameAttribute(N.LOCALITY_NAME, "Seoul"),
-            x509.NameAttribute(N.ORGANIZATION_NAME, "COWAY"),
-            x509.NameAttribute(N.ORGANIZATIONAL_UNIT_NAME, "SW Dev Unit"),
-            x509.NameAttribute(N.COMMON_NAME, "Coway_iTrust"),
-        ]
-    )
-    now = dt.datetime.now(dt.UTC)
-    b = (
-        x509.CertificateBuilder()
-        .subject_name(name)
-        .issuer_name(name)
-        .public_key(k.public_key())
-        .serial_number(x509.random_serial_number())
-        .not_valid_before(now - dt.timedelta(days=1))
-        .not_valid_after(now + dt.timedelta(days=9000))
-    )
-    try:  # original cert is SHA1; some OpenSSL builds refuse SHA1 signing (never verified anyway)
-        c = b.sign(k, hashes.SHA1())
-    except UnsupportedAlgorithm:
-        c = b.sign(k, hashes.SHA256())
-    key.write_bytes(
-        k.private_bytes(
-            serialization.Encoding.PEM,
-            serialization.PrivateFormat.TraditionalOpenSSL,
-            serialization.NoEncryption(),
-        )
-    )
+        if _is_sha1_cert(cert):
+            return str(cert), str(key)
+        log.warning("existing cert %s is not SHA1-signed; regenerating", cert)
+    cmd = [
+        "openssl", "req", "-x509", "-newkey", "rsa:2048", "-keyout", str(key), "-out", str(cert),
+        "-days", "9000", "-nodes", "-sha1", "-subj", CERT_SUBJECT,
+    ]  # fmt: skip
+    try:
+        r = subprocess.run(cmd, capture_output=True, text=True, timeout=60)
+    except (OSError, subprocess.TimeoutExpired) as e:
+        raise RuntimeError(f"cannot run openssl to create the SHA1 certificate: {e}") from e
+    if r.returncode != 0:
+        raise RuntimeError(f"openssl failed to create the SHA1 certificate: {r.stderr.strip()}")
+    if not _is_sha1_cert(cert):
+        raise RuntimeError("generated certificate is not SHA1-signed (openssl policy forbids it?)")
     os.chmod(key, 0o600)
-    cert.write_bytes(c.public_bytes(serialization.Encoding.PEM))
     return str(cert), str(key)
 
 
@@ -161,7 +154,7 @@ class Session:
         self.online = False
         self.writer.close()
         with contextlib.suppress(Exception):
-            await self.writer.wait_closed()
+            await asyncio.wait_for(self.writer.wait_closed(), 1)
 
 
 class DeviceHub:
@@ -179,6 +172,7 @@ class DeviceHub:
         self._online_cbs: list[Callable] = []
         self._frame_cbs: list[Callable] = []
         self._server: asyncio.Server | None = None
+        self._ssl: ssl.SSLContext | None = None
         self._tasks: set[asyncio.Task] = set()
         self.port: int | None = None
 
@@ -245,20 +239,24 @@ class DeviceHub:
 
     # --- lifecycle ---------------------------------------------------------------
     async def start(self, host: str, port: int, ssl_context: ssl.SSLContext | None) -> None:
-        self._server = await asyncio.start_server(
-            self._handle, host, port, ssl=ssl_context, ssl_handshake_timeout=10
-        )
+        # TLS is negotiated in _handle (not by start_server) so handshake failures are logged
+        self._ssl = ssl_context
+        self._server = await asyncio.start_server(self._handle, host, port)
         self.port = self._server.sockets[0].getsockname()[1]
         log.info("listening on %s:%s", host, self.port)
 
     async def stop(self) -> None:
         if self._server:
             self._server.close()
-        for s in list(self._sessions.values()):
-            await s.close()
         for t in list(self._tasks):
             t.cancel()
-        await asyncio.gather(*self._tasks, return_exceptions=True)
+        sessions = list(self._sessions.values())
+        with contextlib.suppress(Exception):
+            await asyncio.wait_for(
+                asyncio.gather(*(s.close() for s in sessions), return_exceptions=True), 2
+            )
+        if self._tasks:
+            await asyncio.wait(list(self._tasks), timeout=2)
         if self._server:
             with contextlib.suppress(Exception):
                 await asyncio.wait_for(self._server.wait_closed(), 2)
@@ -276,15 +274,35 @@ class DeviceHub:
         session: Session | None = None
         poller: asyncio.Task | None = None
         buf = b""
+        pn = writer.get_extra_info("peername")
+        peer_ip = pn[0] if pn else "?"
+        reason = "closed by peer"
         try:
+            if self._ssl is not None:
+                loop = asyncio.get_running_loop()
+                proto = writer.transport.get_protocol()
+                try:
+                    transport = await loop.start_tls(
+                        writer.transport,
+                        proto,
+                        self._ssl,
+                        server_side=True,
+                        ssl_handshake_timeout=10,
+                    )
+                except (OSError, ssl.SSLError, TimeoutError) as e:  # SSLError is an OSError
+                    log.warning("TLS handshake with %s failed: %s", peer_ip, e or type(e).__name__)
+                    return
+                writer = asyncio.StreamWriter(transport, proto, reader, loop)
             while True:
                 try:
                     chunk = await asyncio.wait_for(reader.read(4096), self.silence_timeout)
                 except TimeoutError:
+                    reason = f"no data for {self.silence_timeout:g}s"
                     log.warning(
-                        "no data for %ss, dropping %s",
+                        "no data for %ss, dropping %s (%s)",
                         self.silence_timeout,
                         session.mac if session else "unidentified peer",
+                        peer_ip,
                     )
                     break
                 if not chunk:
@@ -292,19 +310,24 @@ class DeviceHub:
                 buf += chunk
                 raws, buf = codec.split_frames(buf)
                 if len(buf) > 65536:
+                    reason = "frame buffer overflow"
+                    log.warning("frame buffer overflow from %s, dropping", peer_ip)
                     break
                 for raw in raws:
                     try:
                         frame = codec.decode_frame(raw)
                     except codec.FrameError as e:
-                        log.warning("bad frame: %s (%r)", e, raw[:80])
+                        log.warning("bad frame from %s: %s (%r)", peer_ip, e, raw[:80])
                         if session:
                             await self.notify_frame(session.mac, "P>A", raw)
                         continue
                     if session is None:
                         mac = frame.mac.upper()
                         if self.allowed and mac not in self.allowed:
-                            log.warning("rejecting MAC %s (not in allowed_macs)", mac)
+                            reason = "MAC not allowed"
+                            log.warning(
+                                "rejecting MAC %s from %s (not in allowed_macs)", mac, peer_ip
+                            )
                             return
                         old = self._sessions.get(mac)
                         new_peer = writer.get_extra_info("peername")
@@ -321,9 +344,17 @@ class DeviceHub:
                                 new_ip,
                                 old.peer_ip,
                             )
+                            reason = "refused: live session from another peer"
                             return
                         session = Session(self, writer, frame.hdr, mac)
                         self._sessions[mac] = session
+                        log.info(
+                            "purifier connected: ip=%s mac=%s serial=%s fw=%s",
+                            new_ip,
+                            mac,
+                            session.serial,
+                            self._dev(mac)["firmware"] or "unknown",
+                        )
                         if old:
                             log.info(
                                 "replacing session for %s (old peer %s, new peer %s)",
@@ -336,12 +367,20 @@ class DeviceHub:
                         poller = asyncio.create_task(self._poll_loop(session))
                     await self._on_frame(session, raw, frame)
         except (ConnectionError, OSError, ssl.SSLError) as e:
-            log.info("connection error: %s", e)
+            reason = f"connection error: {e}"
+            log.warning("connection error with %s: %s", peer_ip, e)
         finally:
             if poller:
                 poller.cancel()
             writer.close()
             if session:
+                log.info(
+                    "purifier disconnected: ip=%s mac=%s serial=%s reason=%s",
+                    peer_ip,
+                    session.mac,
+                    session.serial,
+                    reason,
+                )
                 session.online = False
                 if self._sessions.get(session.mac) is session:
                     del self._sessions[session.mac]
@@ -356,6 +395,7 @@ class DeviceHub:
         await self.notify_frame(s.mac, "P>A", raw)
         if frame.code == "A1000" and frame.verb == "QM":
             d["firmware"] = frame.data.lstrip("V")
+            log.info("purifier %s firmware %s", s.mac, d["firmware"])
             await self._set_online(s.mac, True)
             return
         channel = CODE_CHANNEL.get(frame.code)

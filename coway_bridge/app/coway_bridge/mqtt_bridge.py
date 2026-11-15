@@ -245,13 +245,31 @@ def discovery_messages(
     return msgs
 
 
+MAX_RETRY_DELAY = 60.0
+
+
+def _rc_value(rc) -> int:
+    """Reason/return code as int (aiomqtt returns ints for MQTT 3.1.1, ReasonCode for v5)."""
+    v = getattr(rc, "value", rc)
+    return v if isinstance(v, int) else 0
+
+
+def rc_failed(rc) -> bool:
+    return _rc_value(rc) >= 0x80
+
+
+class SubscribeRefused(Exception):
+    pass
+
+
 class MqttBridge:
     def __init__(self, hub: DeviceHub, cfg, base: str = BASE, prefix: str = PREFIX):
         self.hub, self.cfg, self.base, self.prefix = hub, cfg, base, prefix
         self._q: asyncio.Queue = asyncio.Queue(maxsize=1000)
         self._extra: dict[str, set[int]] = {}
         self._stop = asyncio.Event()
-        self.retry_delay = 5.0
+        self.retry_delay = 5.0  # initial backoff; doubles per failure up to MAX_RETRY_DELAY
+        self._pub_refused: set[str] = set()
         self._firmware: dict[str, str | None] = {}
         hub.add_state_callback(self._on_state)
         hub.add_online_callback(self._on_online)
@@ -307,10 +325,41 @@ class MqttBridge:
         """Ask run() to publish retained offline topics, disconnect cleanly and return."""
         self._stop.set()
 
+    async def _pub(self, client, topic: str, payload, retain: bool = True) -> None:
+        """QoS1 publish; log (once per topic) if the broker refuses it."""
+        rc = await client.publish(topic, payload, qos=1, retain=retain)
+        if rc_failed(rc):
+            if topic not in self._pub_refused:
+                self._pub_refused.add(topic)
+                log.error(
+                    "mqtt publish to %s refused by broker (reason code 0x%02x, user %r): "
+                    "check the user's publish permissions",
+                    topic,
+                    _rc_value(rc),
+                    self.cfg.mqtt_username or None,
+                )
+        else:
+            self._pub_refused.discard(topic)
+
+    async def _subscribe(self, client, topic: str) -> None:
+        rcs = await client.subscribe(topic, qos=1)
+        if not isinstance(rcs, (list, tuple)):
+            rcs = [rcs]
+        bad = [rc for rc in rcs if rc_failed(rc)]
+        if bad:
+            log.error(
+                "mqtt subscribe to %s refused by broker (reason code 0x%02x, user %r): "
+                "not authorized? check the user's topic permissions",
+                topic,
+                _rc_value(bad[0]),
+                self.cfg.mqtt_username or None,
+            )
+            raise SubscribeRefused(topic)
+
     async def _publish_offline(self, client) -> None:
-        await client.publish(f"{self.base}/status", "offline", retain=True)
+        await self._pub(client, f"{self.base}/status", "offline")
         for mac in self.hub.macs():
-            await client.publish(f"{self.base}/{dev_id(mac)}/online", "offline", retain=True)
+            await self._pub(client, f"{self.base}/{dev_id(mac)}/online", "offline")
 
     async def _listen(self, client) -> None:
         async for m in client.messages:
@@ -324,6 +373,7 @@ class MqttBridge:
         import aiomqtt
 
         cfg = self.cfg
+        delay = self.retry_delay
         while not self._stop.is_set():
             try:
                 tls = ssl.create_default_context() if cfg.mqtt_tls else None
@@ -338,8 +388,9 @@ class MqttBridge:
                     log.info("mqtt connected")
                     while not self._q.empty():
                         self._q.get_nowait()
-                    await client.publish(f"{self.base}/status", "online", retain=True)
-                    await client.subscribe(f"{self.base}/+/+/set")
+                    await self._pub(client, f"{self.base}/status", "online")
+                    await self._subscribe(client, f"{self.base}/+/+/set")
+                    delay = self.retry_delay
                     self._republish_all()
                     stopping = False
                     try:
@@ -354,15 +405,16 @@ class MqttBridge:
                     if stopping:
                         await self._publish_offline(client)  # before the clean disconnect
                         return
-            except aiomqtt.MqttError as e:
-                log.warning("mqtt error: %s; retrying in %gs", e, self.retry_delay)
+            except (aiomqtt.MqttError, SubscribeRefused) as e:
+                log.warning("mqtt error: %r; retrying in %gs", e, delay)
             with contextlib.suppress(TimeoutError):
-                await asyncio.wait_for(self._stop.wait(), self.retry_delay)
+                await asyncio.wait_for(self._stop.wait(), delay)
+            delay = min(delay * 2, MAX_RETRY_DELAY)
 
     async def _publisher(self, client) -> None:
         while True:
             topic, payload, retain = await self._q.get()
-            await client.publish(topic, payload, retain=retain)
+            await self._pub(client, topic, payload, retain)
 
 
 class _Stop(Exception):

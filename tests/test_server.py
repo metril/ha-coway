@@ -82,6 +82,39 @@ def test_cert_subject(tmp_path):
     assert ensure_cert(tmp_path)[0] == cert
 
 
+def test_cert_is_sha1_and_regenerated_if_not(tmp_path, caplog):
+    import datetime as dt
+
+    from cryptography import x509
+    from cryptography.hazmat.primitives import hashes, serialization
+    from cryptography.hazmat.primitives.asymmetric import rsa
+    from cryptography.x509.oid import NameOID
+
+    cert, key = ensure_cert(tmp_path)
+    c = x509.load_pem_x509_certificate(open(cert, "rb").read())
+    assert c.signature_algorithm_oid._name == "sha1WithRSAEncryption"
+    assert isinstance(c.signature_hash_algorithm, hashes.SHA1)
+    # replace with a SHA256 cert -> must be regenerated
+    k = rsa.generate_private_key(65537, 2048)
+    n = x509.Name([x509.NameAttribute(NameOID.COMMON_NAME, "x")])
+    now = dt.datetime.now(dt.UTC)
+    c2 = (
+        x509.CertificateBuilder()
+        .subject_name(n)
+        .issuer_name(n)
+        .public_key(k.public_key())
+        .serial_number(1)
+        .not_valid_before(now)
+        .not_valid_after(now + dt.timedelta(days=1))
+        .sign(k, hashes.SHA256())
+    )
+    open(cert, "wb").write(c2.public_bytes(serialization.Encoding.PEM))
+    ensure_cert(tmp_path)
+    c3 = x509.load_pem_x509_certificate(open(cert, "rb").read())
+    assert isinstance(c3.signature_hash_algorithm, hashes.SHA1)
+    assert "not SHA1" in caplog.text
+
+
 async def test_session_flow(hub):
     events = []
     hub.add_online_callback(lambda mac, on, fw: events.append(("online", mac, on, fw)))
@@ -221,3 +254,26 @@ async def test_stale_or_same_ip_session_replaced(hub):
     p3.send("A1000QMV0.0.0.13")
     await wait_for(lambda: hub.session(MAC) is not second and not second.online)
     assert hub.session(MAC).serial == "00000TST0000000001"
+
+
+async def test_tls_handshake_failure_logged_with_peer_ip(hub, caplog):
+    r, w = await asyncio.open_connection("127.0.0.1", hub.port)
+    w.write(b"not tls at all\n" * 4)
+    await w.drain()
+    await wait_for(lambda: "TLS handshake with 127.0.0.1 failed" in caplog.text)
+    assert any(r.levelname == "WARNING" for r in caplog.records if "handshake" in r.getMessage())
+    w.close()
+
+
+async def test_session_connect_disconnect_logged(hub, caplog):
+    import logging
+
+    caplog.set_level(logging.INFO)
+    p = await Purifier.connect(hub.port)
+    p.send("A1000QMV0.0.0.13")
+    await p.w.drain()
+    await wait_for(lambda: "purifier connected: ip=127.0.0.1" in caplog.text)
+    assert MAC in caplog.text
+    p.w.close()
+    await wait_for(lambda: "purifier disconnected" in caplog.text)
+    assert "reason=closed by peer" in caplog.text
