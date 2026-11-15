@@ -1,0 +1,118 @@
+"""Entry point: python -m coway_bridge [--config PATH] [overrides]."""
+
+from __future__ import annotations
+
+import argparse
+import asyncio
+import contextlib
+import logging
+import logging.handlers
+import signal
+from pathlib import Path
+
+from .config import load_config
+from .mqtt_bridge import MqttBridge
+from .relay import Relay
+from .server import DeviceHub, build_ssl_context, ensure_cert
+from .web import WebApp, bound_port, start_web
+
+log = logging.getLogger(__name__)
+LISTEN_PORT = 9090  # fixed inside the container; remap the host port in the app's Network UI
+
+
+def _frame_logger(data_dir: str):
+    """Rotated frames.log in the data dir (option log_frames_to_file)."""
+    h = logging.handlers.RotatingFileHandler(
+        Path(data_dir) / "frames.log", maxBytes=2_000_000, backupCount=3
+    )
+    lg = logging.getLogger("coway_bridge.frames")
+    lg.propagate = False
+    lg.addHandler(h)
+    lg.setLevel(logging.INFO)
+
+    def observer(mac, direction, raw, decoded):
+        lg.info("%s %s %s", direction, mac, raw.hex())
+
+    return observer
+
+
+class App:
+    def __init__(
+        self, cfg, mqtt: bool = True, web_host: str = "0.0.0.0", listen_port: int = LISTEN_PORT
+    ):
+        self.cfg, self.use_mqtt, self.web_host = cfg, mqtt, web_host
+        self.listen_port = listen_port
+        self.hub = DeviceHub(cfg.allowed_macs)
+        self.relay = Relay(self.hub, cfg.cloud_host) if cfg.cloud_relay else None
+        self.web = WebApp(self.hub, cfg, self.relay)
+        self.bridge = MqttBridge(self.hub, cfg) if mqtt else None
+        self._runner = None
+        self._mqtt_task: asyncio.Task | None = None
+        self.web_port: int | None = None
+
+    async def start(self) -> None:
+        cfg = self.cfg
+        Path(cfg.data_dir).mkdir(parents=True, exist_ok=True)
+        if cfg.log_frames_to_file:
+            self.hub.add_frame_observer(_frame_logger(cfg.data_dir))
+        cert, key = ensure_cert(cfg.data_dir)
+        await self.hub.start(cfg.listen_host, self.listen_port, build_ssl_context(cert, key))
+        self._runner = await start_web(self.web, self.web_host, cfg.ingress_port)
+        self.web_port = bound_port(self._runner)
+        if self.bridge:
+            self._mqtt_task = asyncio.create_task(self.bridge.run())
+
+    async def stop(self) -> None:
+        if self._mqtt_task:
+            # clean shutdown: bridge publishes retained offline topics, then disconnects
+            self.bridge.request_stop()
+            try:
+                await asyncio.wait_for(asyncio.shield(self._mqtt_task), 5)
+            except (TimeoutError, Exception):
+                self._mqtt_task.cancel()
+            await asyncio.gather(self._mqtt_task, return_exceptions=True)
+        if self.relay:
+            await self.relay.stop()
+        if self._runner:
+            await self._runner.cleanup()
+        await self.hub.stop()
+
+
+async def amain(cfg) -> None:
+    app = App(cfg)
+    stop = asyncio.Event()
+    loop = asyncio.get_running_loop()
+    for sig in (signal.SIGINT, signal.SIGTERM):
+        with contextlib.suppress(NotImplementedError):
+            loop.add_signal_handler(sig, stop.set)
+    await app.start()
+    log.info("coway-bridge up: purifiers :%s, web :%s", app.hub.port, app.web_port)
+    try:
+        waits = [asyncio.create_task(stop.wait())]
+        if app._mqtt_task:
+            waits.append(app._mqtt_task)
+        await asyncio.wait(waits, return_when=asyncio.FIRST_COMPLETED)
+        if app._mqtt_task and app._mqtt_task.done() and not stop.is_set():
+            app._mqtt_task.result()  # surface crash
+    finally:
+        await app.stop()
+
+
+def main(argv: list[str] | None = None) -> None:
+    p = argparse.ArgumentParser(prog="coway-bridge")
+    p.add_argument("--config", default="/data/options.json")
+    p.add_argument("--data-dir")
+    p.add_argument("--ingress-port", type=int)
+    p.add_argument("--mqtt-host")
+    p.add_argument("--mqtt-port", type=int)
+    p.add_argument("--log-level")
+    a = p.parse_args(argv)
+    overrides = {k: v for k, v in vars(a).items() if k != "config"}
+    cfg = load_config(a.config, overrides=overrides)
+    logging.basicConfig(level=cfg.log_level.upper(), format="%(asctime)s %(name)s %(message)s")
+    with contextlib.suppress(KeyboardInterrupt):
+        asyncio.run(amain(cfg))
+
+
+if __name__ == "__main__":
+    main()

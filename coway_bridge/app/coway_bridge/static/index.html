@@ -1,0 +1,332 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>coway-bridge</title>
+<style>
+:root{--bg:#fafafa;--card:#fff;--text:#212121;--muted:#5f6368;--border:#e0e0e0;--accent:#03a9f4;--accent-text:#0277bd;--ok:#2e7d32;--warn:#b26a00;--err:#c62828;--warn-bg:#fff4e0;--accent-bg:#e1f5fe;--dir-pa:#1565c0;--dir-ap:#2e7d32;--dir-cp:#6a1b9a;--dir-pc:#b45309;color-scheme:light dark}
+@media (prefers-color-scheme:dark){:root{--bg:#111;--card:#1c1c1c;--text:#e1e1e1;--muted:#9b9b9b;--border:#2f2f2f;--accent:#4fc3f7;--accent-text:#4fc3f7;--ok:#66bb6a;--warn:#ffb74d;--err:#ef5350;--warn-bg:#3a2a10;--accent-bg:#0d2a3a;--dir-pa:#64b5f6;--dir-ap:#81c784;--dir-cp:#ce93d8;--dir-pc:#ffb74d}}
+*{box-sizing:border-box}
+body{margin:0;background:var(--bg);color:var(--text);font:14px/1.45 system-ui,-apple-system,"Segoe UI",Roboto,sans-serif;font-variant-numeric:tabular-nums}
+.mono,pre,code,td.mono{font:12.5px ui-monospace,SFMono-Regular,Menlo,Consolas,monospace}
+header{display:flex;flex-wrap:wrap;align-items:center;gap:12px;padding:12px 16px;border-bottom:1px solid var(--border);background:var(--card)}
+header h1{font-size:16px;margin:0;font-weight:600}
+header .sp{flex:1}
+main{max-width:1440px;margin:0 auto;padding:16px;display:grid;gap:16px;grid-template-columns:1fr}
+@media (min-width:900px){main{grid-template-columns:minmax(320px,1fr) 2fr}}
+.col{display:flex;flex-direction:column;gap:16px;min-width:0}
+.card{background:var(--card);border:1px solid var(--border);border-radius:12px;padding:16px;min-width:0}
+.card h2{font-size:16px;font-weight:600;margin:0 0 12px}
+.stale{opacity:.6}
+.banner{background:var(--warn-bg);color:var(--warn);padding:8px 16px;border-bottom:1px solid var(--border)}
+.muted{color:var(--muted)}
+.ok{color:var(--ok)}.warn{color:var(--warn)}.err{color:var(--err)}
+button,input,select{font:inherit;color:inherit}
+button{min-height:36px;padding:0 12px;border:1px solid var(--border);border-radius:8px;background:var(--card);cursor:pointer}
+button:hover:not(:disabled){border-color:var(--accent)}
+button[aria-pressed=true]{background:var(--accent-bg);border-color:var(--accent);color:var(--accent-text)}
+button:disabled{opacity:.5;cursor:not-allowed}
+@media (pointer:coarse){button,input,select{min-height:44px}}
+input,select{min-height:36px;padding:0 8px;border:1px solid var(--border);border-radius:8px;background:var(--card)}
+:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
+dl{display:grid;grid-template-columns:auto 1fr;gap:4px 12px;margin:0}dt{color:var(--muted)}dd{margin:0;word-break:break-all}
+.row{display:flex;flex-wrap:wrap;gap:8px;align-items:center;margin:8px 0}
+.row label{min-width:48px;color:var(--muted)}
+.tw{overflow-x:auto}
+table{border-collapse:collapse;width:100%}
+th,td{text-align:left;padding:4px 8px;border-bottom:1px solid var(--border);white-space:nowrap}
+th{color:var(--muted);font-weight:600}
+tbody.grp th{background:var(--bg);font-size:12px}
+tr.unk{background:var(--warn-bg)}
+td.flash{background:var(--accent-bg)}
+@media (prefers-reduced-motion:no-preference){td.raw{transition:background 1s}}
+.tools{display:flex;flex-wrap:wrap;gap:8px;align-items:center;margin-bottom:8px}
+.seg button[aria-pressed=true]{font-weight:600}
+#log{height:calc(100vh - 340px);min-height:320px;overflow:auto;border:1px solid var(--border);border-radius:8px;position:relative}
+@media (max-width:899px){#log{height:60vh}}
+.fr{display:grid;grid-template-columns:96px 44px 1fr;gap:8px;padding:2px 8px;border-left:3px solid transparent;cursor:pointer;align-items:baseline}
+.fr .raw{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.fr .sum{grid-column:3;color:var(--muted)}
+.fr.exp .raw{white-space:normal;word-break:break-all}
+.fr[data-d="P>A"]{border-color:var(--dir-pa)}.fr[data-d="A>P"]{border-color:var(--dir-ap)}.fr[data-d="C>P"]{border-color:var(--dir-cp)}.fr[data-d="P>C"]{border-color:var(--dir-pc)}
+.tag{font-weight:700}
+[data-d="P>A"] .tag{color:var(--dir-pa)}[data-d="A>P"] .tag{color:var(--dir-ap)}[data-d="C>P"] .tag{color:var(--dir-cp)}[data-d="P>C"] .tag{color:var(--dir-pc)}
+.detail{grid-column:1/-1;padding:4px 0}
+#pill{position:sticky;bottom:8px;margin:0 auto;display:block}
+.hide{display:none!important}
+pre{white-space:pre-wrap;word-break:break-all;margin:8px 0;padding:8px;background:var(--bg);border-radius:8px}
+details summary{cursor:pointer;font-weight:600}
+.err-in{color:var(--err);font-size:12px}
+.spin{display:inline-block;width:10px;height:10px;border:2px solid var(--muted);border-top-color:transparent;border-radius:50%;margin-right:4px;vertical-align:-1px}
+@media (prefers-reduced-motion:no-preference){.spin{animation:s 1s linear infinite}@keyframes s{to{transform:rotate(360deg)}}}
+</style>
+</head>
+<body>
+<header>
+  <h1>coway-bridge</h1>
+  <label id="picker" class="hide">Device: <select id="dev"></select></label>
+  <span class="sp"></span>
+  <span id="wsi" role="status" aria-live="polite">Offline</span>
+  <span id="relay" class="muted">Relay: off</span>
+</header>
+<div id="banner" class="banner hide" role="status"></div>
+<main id="main">
+  <section class="card hide" id="empty" aria-labelledby="eh" style="grid-column:1/-1">
+    <h2 id="eh">No purifier has connected yet.</h2>
+    <ul><li>NAT redirect of the purifier's traffic to HAOS:9090</li><li>Firewall allows IoT VLAN to HAOS:9090</li><li><code>allowed_macs</code> contains the purifier's MAC (or is empty)</li></ul>
+    <button id="openSetup">Open Setup</button>
+  </section>
+  <div class="col" id="left">
+    <section class="card" id="status" aria-labelledby="sh"><h2 id="sh">Status</h2>
+      <div id="stline"></div>
+      <dl>
+        <dt>MAC</dt><dd id="s-mac">-</dd>
+        <dt>Serial</dt><dd id="s-serial">-</dd>
+        <dt>FW</dt><dd id="s-fw">-</dd>
+        <dt>Last seen</dt><dd id="s-seen">-</dd>
+        <dt>Connected since</dt><dd id="s-since">-</dd>
+        <dt>Upstream</dt><dd id="s-up">-</dd>
+      </dl>
+    </section>
+    <section class="card" id="actions" aria-labelledby="ah"><h2 id="ah">Actions</h2>
+      <div id="offline-reason" class="warn hide">Purifier offline; commands would be dropped.</div>
+      <div class="row"><label>Power</label><button data-cmd='{"type":"power","value":"on"}' data-pr="power:On">On</button><button data-cmd='{"type":"power","value":"off"}' data-pr="power:Off">Off</button></div>
+      <div class="row"><label>Speed</label><button data-cmd='{"type":"speed","value":1}' data-pr="speed:1">1</button><button data-cmd='{"type":"speed","value":2}' data-pr="speed:2">2</button><button data-cmd='{"type":"speed","value":3}' data-pr="speed:3">3</button></div>
+      <div class="row"><label>Light</label><button data-cmd='{"type":"light","value":"on"}' data-pr="light:On">On</button><button data-cmd='{"type":"light","value":"off"}' data-pr="light:Off">Off</button></div>
+      <div class="row"><label for="rr">Raw</label><input id="rr" size="6" maxlength="4" placeholder="reg" pattern="[0-9A-Fa-f]{4}" aria-label="Register (4 hex)"><input id="rv" size="6" maxlength="4" placeholder="val" pattern="[0-9A-Fa-f]{4}" aria-label="Value (4 hex)"><button id="rw">Write</button></div>
+      <div id="rawerr" class="err-in hide">Use 4 hex digits, e.g. 0001</div>
+      <div class="row"><button data-cmd='{"type":"snapshot"}'>Request snapshot</button></div>
+      <div id="result" aria-live="polite" class="muted"></div>
+    </section>
+    <details class="card" id="setup"><summary>Setup (Wi-Fi)</summary>
+      <ol>
+        <li>Hold the purifier's Wi-Fi button until the Wi-Fi LED blinks (pairing mode).</li>
+        <li>Join the open Wi-Fi network <code>Airmega_400s</code> on a laptop.</li>
+        <li>Download the single-file CLI (stdlib only): <code>curl -O https://raw.githubusercontent.com/metril/ha-coway/main/coway_bridge/app/coway_bridge/setup_cli.py</code></li>
+        <li>Enter the serial number from the unit's label (filled in automatically once a unit has connected) and your SSID below, then run the generated command on that laptop. The CLI prompts for the Wi-Fi password.</li>
+        <li>Rejoin your normal Wi-Fi; the purifier should appear here within ~1 min.</li>
+      </ol>
+      <div class="row"><label for="ssid">SSID</label><input id="ssid" autocomplete="off"></div>
+      <div class="row"><label for="serial">Serial</label><input id="serial" autocomplete="off"></div>
+      <pre id="cmd"></pre>
+      <button id="copy">Copy command</button>
+      <p class="muted">The command has no password: the CLI asks for it on the laptop, so it never appears here or in shell history.</p>
+    </details>
+  </div>
+  <div class="col" id="right">
+    <section class="card" id="regs" aria-labelledby="rh"><h2 id="rh">Registers</h2>
+      <div class="tools"><input id="rf" placeholder="filter" aria-label="Filter registers"><label><input type="checkbox" id="unk"> unknown only</label><span id="stale" class="muted hide">stale</span></div>
+      <div class="tw"><table><thead><tr><th scope="col">Reg</th><th scope="col">Name</th><th scope="col">Raw</th><th scope="col">Decoded</th><th scope="col">Updated</th></tr></thead>
+        <tbody class="grp"><tr><th colspan="5" scope="colgroup">Control</th></tr></tbody><tbody id="t-control"></tbody>
+        <tbody class="grp"><tr><th colspan="5" scope="colgroup">Sensors</th></tr></tbody><tbody id="t-sensor"></tbody></table></div>
+      <p id="regempty" class="muted">Waiting for first status report…</p>
+    </section>
+    <section class="card" id="logcard" aria-labelledby="lh"><h2 id="lh">Frame log</h2>
+      <div class="tools">
+        <span class="seg" role="group" aria-label="Direction filter"><button data-dir="P>A" aria-pressed="true">P→A</button><button data-dir="A>P" aria-pressed="true">A→P</button><button data-dir="C>P" aria-pressed="true" class="cloud">C→P</button><button data-dir="P>C" aria-pressed="true" class="cloud">P→C</button></span>
+        <input id="ls" placeholder="search (/)" aria-label="Search frames">
+        <button id="pause">Pause</button><button id="clear">Clear</button><button id="dl">Download</button>
+        <span id="cnt" class="muted">0 / 0</span>
+      </div>
+      <div id="hr" class="muted hide">High frame rate – showing latest 500</div>
+      <div id="log" role="log" aria-live="off" tabindex="0"><div id="logempty" class="muted" style="padding:8px">No frames yet. Frames appear here live.</div><div id="rows"></div></div>
+      <button id="pill" class="hide">new frames ↓</button>
+    </section>
+  </div>
+</main>
+<script>
+(()=>{
+"use strict";
+const $=s=>document.querySelector(s);
+const MAXF=2000,SHOW=500;
+const st={devices:{},bridge:{},sel:null,frames:[],paused:false,held:[],pending:false,newBelow:0,rate:[],ws:null,live:false,retry:0};
+const reduce=matchMedia("(prefers-reduced-motion: reduce)").matches;
+const dirs={"P>A":"P→A","A>P":"A→P","C>P":"C→P","P>C":"P→C"};
+const act={"P>A":true,"A>P":true,"C>P":true,"P>C":true};
+const esc=s=>String(s).replace(/[\u0000-\u001f]/g,c=>c=="\u0002"?"␂":c=="\u0003"?"␃":"·");
+const hm=t=>t?new Date(t).toLocaleTimeString([],{hour12:false}):"-";
+const ago=t=>{if(!t)return"-";const s=Math.max(0,Math.round((Date.now()-new Date(t))/1000));return s<60?s+"s ago":s<3600?Math.floor(s/60)+" min ago":Math.floor(s/3600)+" h ago"};
+const dev=()=>st.devices[st.sel];
+
+function setDevices(list){st.devices={};list.forEach(d=>st.devices[d.mac]=d);const m=Object.keys(st.devices);if(!st.devices[st.sel])st.sel=m[0]||null;renderAll()}
+function upsert(d){st.devices[d.mac]=d;if(!st.sel)st.sel=d.mac;renderAll()}
+function renderAll(){
+  const macs=Object.keys(st.devices),none=!macs.length;
+  $("#empty").classList.toggle("hide",!none);
+  ["#status","#actions","#regs","#logcard"].forEach(s=>$(s).classList.toggle("hide",none));
+  if(none)$("#setup").open=true;
+  $("#picker").classList.toggle("hide",macs.length<2);
+  const sel=$("#dev");sel.innerHTML="";macs.forEach(m=>{const o=document.createElement("option");o.value=o.textContent=m;sel.appendChild(o)});sel.value=st.sel||"";
+  const relayOn=st.bridge.relay_enabled;
+  document.querySelectorAll(".cloud").forEach(b=>b.classList.toggle("hide",!relayOn));
+  renderStatus();renderRegs();renderFrames();
+}
+function renderStatus(){
+  const d=dev(),r=$("#relay"),on=st.bridge.relay_enabled;
+  r.textContent="Relay: "+(!on?"off":(d&&d.upstream.state==="up"?"up":"down"));
+  if(!d){return}
+  const stale=d.last_seen&&(Date.now()-new Date(d.last_seen))>60000;
+  const online=d.online&&!stale;
+  $("#stline").innerHTML=online?'<strong class="ok">● Connected</strong>':'<strong class="err">✕ Disconnected</strong> <span class="muted">– last seen '+ago(d.last_seen)+'</span>';
+  $("#s-mac").textContent=d.mac;$("#s-fw").textContent=d.fw||"-";$("#s-serial").textContent=d.serial||"-";if(d.serial&&!$("#serial").value){$("#serial").value=d.serial;renderCmd()}
+  const ls=$("#s-seen");ls.textContent=ago(d.last_seen);ls.title=d.last_seen||"";
+  $("#s-since").textContent=d.connected_since?hm(d.connected_since):"-";
+  const u=d.upstream||{};let t="-";
+  if(u.state==="disabled")t="-- (relay off)";else if(u.state==="up")t="Up since "+hm(u.since);else if(u.state==="down")t="⚠ Upstream down, local polling. Retry in "+(u.retry_in??"?")+"s."+(u.error?" ("+u.error+")":"");else t="Connecting…";
+  $("#s-up").textContent=t;
+  $("#offline-reason").classList.toggle("hide",online);
+  setBusy(st.pending);
+}
+const rowKey=r=>r.group+r.reg;
+function renderRegs(){
+  const d=dev();["control","sensor"].forEach(g=>$("#t-"+g).innerHTML="");
+  const regs=d?d.registers:[];$("#regempty").classList.toggle("hide",regs.length>0);
+  regs.forEach(r=>putReg(r,false));
+}
+function regVisible(r){const q=$("#rf").value.toLowerCase();if($("#unk").checked&&r.known)return false;return !q||r.reg.toLowerCase().includes(q)||r.name.toLowerCase().includes(q)}
+function putReg(r,flash){
+  const tb=$("#t-"+(r.group==="sensor"?"sensor":"control"));let tr=tb.querySelector('[data-k="'+rowKey(r)+'"]');
+  if(!tr){tr=document.createElement("tr");tr.dataset.k=rowKey(r);tr.innerHTML='<td class="mono"></td><td></td><td class="mono raw"></td><td></td><td></td>';
+    const rows=[...tb.children];const nx=rows.find(x=>x.dataset.k>tr.dataset.k);tb.insertBefore(tr,nx||null)}
+  const c=tr.children,old=c[2].textContent;
+  c[0].textContent=(r.known?"":"! ")+r.reg;c[1].textContent=r.name;c[2].textContent=r.raw;c[3].textContent=r.decoded;c[4].textContent=hm(r.updated);
+  tr.classList.toggle("unk",!r.known);tr.hidden=!regVisible(r);tr._r=r;
+  if(flash&&old&&old!==r.raw&&!reduce&&!st.hi){c[2].classList.add("flash");setTimeout(()=>c[2].classList.remove("flash"),1000)}
+  $("#regempty").classList.add("hide");
+  if(flash)syncActions();
+}
+function syncActions(){
+  const d=dev();if(!d)return;const m={};d.registers.forEach(r=>{if(r.group==="control")m[r.name]=r.decoded});
+  document.querySelectorAll("[data-pr]").forEach(b=>{const[k,v]=b.dataset.pr.split(":");b.setAttribute("aria-pressed",String(m[k]===v))});
+}
+$("#rf").oninput=()=>document.querySelectorAll("#regs tbody tr[data-k]").forEach(tr=>tr.hidden=!regVisible(tr._r));
+$("#unk").onchange=$("#rf").oninput;
+
+// ---- frames
+function frameVisible(f){
+  if(f.mac!==st.sel||!act[f.dir])return false;
+  const q=$("#ls").value.trim().toLowerCase();if(!q)return true;
+  return esc(f.raw).toLowerCase().includes(q)||(f.summary||"").toLowerCase().includes(q)||(f.cmd||"").toLowerCase().includes(q);
+}
+function frameEl(f){
+  const e=document.createElement("div");e.className="fr";e.dataset.d=f.dir;e.dataset.id=f.id;e.tabIndex=0;e.setAttribute("aria-expanded","false");
+  e.innerHTML='<span class="mono"></span><span class="tag mono"></span><span class="raw mono"></span><span class="sum mono"></span>';
+  const c=e.children;c[0].textContent=new Date(f.ts).toLocaleTimeString([],{hour12:false})+"."+String(new Date(f.ts).getMilliseconds()).padStart(3,"0");
+  c[1].textContent=dirs[f.dir];c[2].textContent=esc(f.raw);c[3].textContent=(f.cmd?f.cmd+"  ":"")+(f.summary||"");
+  const tog=()=>{const x=e.classList.toggle("exp");e.setAttribute("aria-expanded",x);
+    if(x){const dd=document.createElement("div");dd.className="detail mono";
+      dd.innerHTML="<div></div><ul></ul><button>Copy raw</button>";dd.firstChild.textContent=esc(f.raw);
+      Object.entries(f.fields||{}).forEach(([k,v])=>{const li=document.createElement("li");li.textContent=k+" = "+v;dd.children[1].appendChild(li)});
+      dd.lastChild.onclick=ev=>{ev.stopPropagation();navigator.clipboard&&navigator.clipboard.writeText(f.raw)};e.appendChild(dd)}
+    else{const dd=e.querySelector(".detail");dd&&dd.remove()}};
+  e.onclick=tog;e.onkeydown=ev=>{if(ev.target===e&&(ev.key==="Enter"||ev.key===" ")){ev.preventDefault();tog()}};
+  return e;
+}
+function renderFrames(){
+  const rows=$("#rows");rows.innerHTML="";
+  const vis=st.frames.filter(frameVisible).slice(-SHOW);const fr=document.createDocumentFragment();vis.forEach(f=>fr.appendChild(frameEl(f)));rows.appendChild(fr);
+  counter();$("#log").scrollTop=$("#log").scrollHeight;
+}
+function counter(){
+  const n=$("#rows").children.length,tot=st.frames.filter(f=>f.mac===st.sel).length;$("#cnt").textContent=n+" / "+tot;
+  const any=st.frames.some(f=>f.mac===st.sel);const le=$("#logempty");
+  if(!any){le.textContent="No frames yet. Frames appear here live.";le.classList.remove("hide")}
+  else if(!n){le.innerHTML="";le.append("No frames match the filter. ");const b=document.createElement("button");b.textContent="Reset filters";b.onclick=resetFilters;le.appendChild(b);le.classList.remove("hide")}
+  else le.classList.add("hide");
+}
+function resetFilters(){Object.keys(act).forEach(k=>act[k]=true);document.querySelectorAll("[data-dir]").forEach(b=>b.setAttribute("aria-pressed","true"));$("#ls").value="";renderFrames()}
+let queue=[],raf=0;
+function enqueue(f){
+  st.frames.push(f);if(st.frames.length>MAXF)st.frames.shift();
+  const now=Date.now();st.rate.push(now);while(st.rate.length&&now-st.rate[0]>2000)st.rate.shift();
+  st.hi=st.rate.length>100;$("#hr").classList.toggle("hide",!st.hi);
+  if(f.dir==="P>A"&&st.devices[f.mac])st.devices[f.mac].last_seen=f.ts;
+  if(st.paused){st.held.push(f);if(st.held.length>MAXF)st.held.shift();$("#pause").textContent="Resume ("+st.held.length+" new)";return}
+  queue.push(f);if(!raf)raf=requestAnimationFrame(flush);
+}
+function flush(){
+  raf=0;const log=$("#log"),stick=log.scrollHeight-log.scrollTop-log.clientHeight<40;
+  const rows=$("#rows"),fr=document.createDocumentFragment();let added=0;
+  queue.forEach(f=>{if(frameVisible(f)){fr.appendChild(frameEl(f));added++}});queue=[];rows.appendChild(fr);
+  while(rows.children.length>SHOW)rows.removeChild(rows.firstChild);
+  counter();
+  if(stick){log.scrollTop=log.scrollHeight;st.newBelow=0;$("#pill").classList.add("hide")}
+  else if(added){st.newBelow+=added;const p=$("#pill");p.textContent=st.newBelow+" new frames ↓";p.classList.remove("hide")}
+}
+$("#pill").onclick=()=>{const l=$("#log");l.scrollTop=l.scrollHeight;st.newBelow=0;$("#pill").classList.add("hide")};
+$("#pause").onclick=togglePause;
+function togglePause(){
+  st.paused=!st.paused;
+  if(!st.paused){const h=st.held;st.held=[];$("#pause").textContent="Pause";h.forEach(f=>{queue.push(f)});if(queue.length&&!raf)raf=requestAnimationFrame(flush)}
+  else $("#pause").textContent="Resume (0 new)";
+}
+let ct=0;
+$("#clear").onclick=()=>{const b=$("#clear");
+  if(!ct){b.textContent="Clear view? Yes / No";ct=setTimeout(()=>{ct=0;b.textContent="Clear"},4000);return}
+  clearTimeout(ct);ct=0;b.textContent="Clear";st.frames=st.frames.filter(f=>f.mac!==st.sel);st.held=[];queue=[];renderFrames()};
+document.querySelectorAll("[data-dir]").forEach(b=>b.onclick=()=>{const k=b.dataset.dir;act[k]=!act[k];b.setAttribute("aria-pressed",String(act[k]));renderFrames()});
+let sd=0;$("#ls").oninput=()=>{clearTimeout(sd);sd=setTimeout(renderFrames,150)};
+$("#dl").onclick=()=>{location.href="api/capture?mac="+encodeURIComponent(st.sel||"")};
+$("#dev").onchange=e=>{st.sel=e.target.value;renderAll()};
+document.addEventListener("keydown",e=>{
+  if(/INPUT|TEXTAREA|SELECT/.test(e.target.tagName)||e.ctrlKey||e.metaKey||e.altKey)return;
+  if(e.key==="p")togglePause();else if(e.key==="/"){e.preventDefault();$("#ls").focus()}});
+
+// ---- actions
+let lastBtn=null;
+function setBusy(b){document.querySelectorAll("#actions button").forEach(x=>{x.disabled=b||offline()}),$("#actions").setAttribute("aria-busy",String(b))}
+function offline(){const d=dev();return !d||!d.online}
+async function send(body,label,btn){
+  if(st.pending||!st.sel)return;st.pending=true;lastBtn=btn;
+  const res=$("#result");res.className="muted";res.innerHTML='<span class="spin"></span>Sending…';setBusy(true);
+  const ac=new AbortController();const to=setTimeout(()=>ac.abort(),10500);
+  try{
+    const r=await fetch("api/devices/"+encodeURIComponent(st.sel)+"/command",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify(body),signal:ac.signal});
+    const j=await r.json().catch(()=>({}));
+    if(r.ok&&j.ok){res.className="ok";res.textContent="✓ "+label+" – acked "+hm(j.at);setTimeout(()=>{if(res.className==="ok")res.className="muted"},4000)}
+    else{res.className="err";res.setAttribute("role","alert");res.textContent="Failed: "+(j.error||("HTTP "+r.status))}
+  }catch(e){res.className="err";res.setAttribute("role","alert");res.textContent="Failed: "+(e.name==="AbortError"?"No ack within 10s":e.message)}
+  finally{clearTimeout(to);st.pending=false;setBusy(false);lastBtn&&lastBtn.focus()}
+}
+document.querySelectorAll("[data-cmd]").forEach(b=>b.onclick=()=>{const c=JSON.parse(b.dataset.cmd);send(c,c.type==="snapshot"?"Snapshot":c.type[0].toUpperCase()+c.type.slice(1)+(c.value!==undefined?" "+String(c.value)[0].toUpperCase()+String(c.value).slice(1):""),b)});
+["#rr","#rv"].forEach(s=>$(s).onblur=e=>e.target.value=e.target.value.toUpperCase());
+$("#rw").onclick=()=>{const r=$("#rr").value.toUpperCase(),v=$("#rv").value.toUpperCase(),ok=/^[0-9A-F]{4}$/;
+  const bad=!(ok.test(r)&&ok.test(v));$("#rawerr").classList.toggle("hide",!bad);if(bad)return;send({type:"raw",reg:r,val:v},"Write "+r+"="+v,$("#rw"))};
+
+// ---- setup
+const q1=s=>"'"+String(s).replace(/'/g,"'\\''")+"'";
+function cmdText(){return "python3 setup_cli.py --serial "+q1($("#serial").value)+" --ssid "+q1($("#ssid").value)}
+function renderCmd(){$("#cmd").textContent=cmdText()}
+$("#ssid").oninput=$("#serial").oninput=renderCmd;
+$("#copy").onclick=async e=>{try{await navigator.clipboard.writeText(cmdText());e.target.textContent="Copied";setTimeout(()=>e.target.textContent="Copy command",2000)}catch(_){}};
+$("#openSetup").onclick=()=>{const s=$("#setup");s.open=true;s.scrollIntoView()};
+renderCmd();
+
+// ---- websocket
+function setLive(s,txt){$("#wsi").textContent=(s?"● ":"✕ ")+txt;$("#wsi").className=s?"ok":"err";document.querySelector("main").classList.toggle("stale",!s&&st.sawLive);$("#stale").classList.toggle("hide",s||!st.sawLive)}
+function connect(){
+  const u=new URL("api/ws",location.href);u.protocol=u.protocol==="https:"?"wss:":"ws:";
+  const ws=new WebSocket(u);st.ws=ws;
+  ws.onopen=()=>{st.retry=0;st.sawLive=true;setLive(true,"Live");$("#banner").classList.add("hide")};
+  ws.onmessage=ev=>{let m;try{m=JSON.parse(ev.data)}catch(_){return}
+    if(m.t==="state"){st.bridge=m.data.bridge;setDevices(m.data.devices);backfill()}
+    else if(m.t==="device")upsert(m.data);
+    else if(m.t==="frame")enqueue(m.data);
+    else if(m.t==="reg"){const d=st.devices[m.data.mac];if(!d)return;const i=d.registers.findIndex(r=>r.group===m.data.group&&r.reg===m.data.reg);if(i<0)d.registers.push(m.data);else d.registers[i]=m.data;if(m.data.mac===st.sel)putReg(m.data,true)}};
+  ws.onclose=()=>{const d=Math.min(30,2**st.retry);st.retry++;setLive(false,"Reconnecting…");
+    const b=$("#banner");b.classList.remove("hide");let n=d;b.textContent="Connection to bridge lost. Retrying in "+n+"s.";
+    const iv=setInterval(()=>{n--;if(n>0)b.textContent="Connection to bridge lost. Retrying in "+n+"s."},1000);
+    setTimeout(()=>{clearInterval(iv);connect()},d*1000)};
+  ws.onerror=()=>ws.close();
+}
+async function backfill(){
+  try{const r=await fetch("api/frames?limit="+MAXF);const j=await r.json();const seen=new Set(st.frames.map(f=>f.id));
+    st.frames=j.frames.concat(st.frames.filter(f=>!j.frames.some(x=>x.id===f.id)));st.frames=st.frames.slice(-MAXF);void seen;renderFrames()}catch(_){}
+}
+setInterval(()=>{renderStatus()},1000);
+setLive(false,"Offline");renderAll();connect();
+})();
+</script>
+</body>
+</html>

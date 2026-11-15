@@ -1,0 +1,369 @@
+"""Home Assistant MQTT discovery + state/command bridge.
+
+Mapping is done by pure functions (derive_state, command_to_writes, discovery_messages) so they
+can be tested without a broker. MqttBridge wires them to a DeviceHub and an aiomqtt client.
+
+Topics: <base>/status (bridge LWT), <base>/<mac>/online, <base>/<mac>/state (JSON),
+        <base>/<mac>/<entity>/set (commands).
+"""
+
+from __future__ import annotations
+
+import asyncio
+import contextlib
+import json
+import logging
+import ssl
+
+from . import registers as R
+from .server import DeviceHub
+
+log = logging.getLogger(__name__)
+BASE = "coway_bridge"
+PREFIX = "homeassistant"
+SPEEDS = {1: 33, 2: 66, 3: 100}
+TIMER_OPTIONS = list(R.TIMER.values())
+SENS_OPTIONS = list(R.SENSITIVITY.values())
+
+
+def dev_id(mac: str) -> str:
+    return mac.lower()
+
+
+def speed_from_percentage(p: int) -> int:
+    return 1 if p <= 33 else 2 if p <= 66 else 3
+
+
+def derive_state(dev: dict) -> dict:
+    """device_state() dict -> flat JSON-able state published to <base>/<mac>/state."""
+    c, s = dev.get("control", {}), dev.get("sensor", {})
+    out: dict = {}
+    power = c.get(R.R_POWER)
+    if power is not None:
+        out["power"] = "ON" if power else "OFF"
+        out["percentage"] = SPEEDS.get(c.get(R.R_SPEED), 0) if power else 0
+    if R.R_MODE in c:
+        out["preset"] = R.MODE_NAMES.get(c[R.R_MODE], "manual")
+    if R.R_LIGHT in c:
+        out["light"] = "ON" if c[R.R_LIGHT] == R.LIGHT_ON else "OFF"
+    if c.get(R.R_SENS) in R.SENSITIVITY:
+        out["sensitivity"] = R.SENSITIVITY[c[R.R_SENS]]
+    if c.get(R.R_TIMER) in R.TIMER:
+        out["timer"] = R.TIMER[c[R.R_TIMER]]
+    if R.S_PM10 in s:
+        out["pm10"] = s[R.S_PM10]
+    if R.S_LUX in s:
+        out["lux"] = s[R.S_LUX]
+    if R.S_PREFILTER in s:
+        out["prefilter"] = max(0, 100 - s[R.S_PREFILTER])
+    if R.S_HEPA in s:
+        out["hepa"] = max(0, 100 - s[R.S_HEPA])
+    for r in R.CONTROL_UNKNOWN:
+        if r in c:
+            out[f"reg_{r:04X}"] = c[r]
+    for r, v in s.items():
+        if r not in R.SENSOR_KNOWN:
+            out[f"sreg_{r:04X}"] = v
+    return out
+
+
+def command_to_writes(entity: str, payload: str, dev: dict) -> dict[int, int] | None:
+    """Map an MQTT command to {reg: val} writes; None if invalid/unsupported."""
+    c = dev.get("control", {})
+    p = payload.strip()
+    if entity == "power":
+        if p.upper() not in ("ON", "OFF"):
+            return None
+        return {R.R_POWER: int(p.upper() == "ON")}
+    if entity == "percentage":
+        try:
+            pct = int(float(p))
+        except ValueError:
+            return None
+        if pct <= 0:
+            return {R.R_POWER: 0}
+        w = {R.R_SPEED: speed_from_percentage(pct)}
+        if not c.get(R.R_POWER):
+            w = {R.R_POWER: 1, **w}
+        return w
+    if entity == "preset":
+        if p == "smart":
+            return {R.R_MODE: 1}
+        if p == "bedtime":
+            return {R.R_MODE: 2}
+        if p == "manual":  # unit flips to manual when a speed is written
+            return {R.R_SPEED: c.get(R.R_SPEED) or 1}
+        return None
+    if entity == "light":
+        if p.upper() not in ("ON", "OFF"):
+            return None
+        return {R.R_LIGHT: R.LIGHT_ON if p.upper() == "ON" else R.LIGHT_OFF}
+    if entity == "sensitivity":
+        inv = {v: k for k, v in R.SENSITIVITY.items()}
+        return {R.R_SENS: inv[p]} if p in inv else None
+    if entity == "timer":
+        inv = {v: k for k, v in R.TIMER.items()}
+        return {R.R_TIMER: inv[p]} if p in inv else None
+    return None
+
+
+def discovery_messages(
+    mac: str,
+    firmware: str | None = None,
+    extra_sensor_regs: tuple[int, ...] = (),
+    base: str = BASE,
+    prefix: str = PREFIX,
+) -> list[tuple[str, dict]]:
+    """[(config_topic, payload)] for all entities of one device."""
+    did = dev_id(mac)
+    t = f"{base}/{did}"
+    device = {
+        "identifiers": [f"coway_{did}"],
+        "connections": [["mac", ":".join(mac[i : i + 2] for i in range(0, 12, 2)).lower()]],
+        "manufacturer": "Coway",
+        "model": "AP-2015E",
+        "name": "Coway Airmega 400S",
+    }
+    if firmware:
+        device["sw_version"] = firmware
+    common = {
+        "device": device,
+        "availability": [{"topic": f"{base}/status"}, {"topic": f"{t}/online"}],
+        "availability_mode": "all",
+        "state_topic": f"{t}/state",
+    }
+    msgs: list[tuple[str, dict]] = []
+
+    def add(platform: str, key: str, payload: dict) -> None:
+        payload = {
+            **common,
+            "unique_id": f"coway_{did}_{key}",
+            "default_entity_id": f"{platform}.coway_{did}_{key}",
+            **payload,
+        }
+        msgs.append((f"{prefix}/{platform}/coway_{did}/{key}/config", payload))
+
+    add(
+        "fan",
+        "fan",
+        {
+            "name": "Air Purifier",
+            "state_value_template": "{{ value_json.power }}",
+            "command_topic": f"{t}/power/set",
+            "percentage_state_topic": f"{t}/state",
+            "percentage_value_template": "{{ value_json.percentage }}",
+            "percentage_command_topic": f"{t}/percentage/set",
+            "preset_mode_state_topic": f"{t}/state",
+            "preset_mode_value_template": "{{ value_json.preset }}",
+            "preset_mode_command_topic": f"{t}/preset/set",
+            "preset_modes": list(R.PRESETS),
+        },
+    )
+    add(
+        "switch",
+        "light",
+        {
+            "name": "Light",
+            "value_template": "{{ value_json.light }}",
+            "command_topic": f"{t}/light/set",
+            "icon": "mdi:lightbulb",
+        },
+    )
+    add(
+        "select",
+        "sensitivity",
+        {
+            "name": "Sensitivity",
+            "value_template": "{{ value_json.sensitivity }}",
+            "command_topic": f"{t}/sensitivity/set",
+            "options": SENS_OPTIONS,
+            "icon": "mdi:tune",
+        },
+    )
+    add(
+        "select",
+        "timer",
+        {
+            "name": "Timer",
+            "value_template": "{{ value_json.timer }}",
+            "command_topic": f"{t}/timer/set",
+            "options": TIMER_OPTIONS,
+            "icon": "mdi:timer-outline",
+        },
+    )
+    add(
+        "sensor",
+        "pm10",
+        {
+            "name": "PM10",
+            "value_template": "{{ value_json.pm10 }}",
+            "device_class": "pm10",
+            "unit_of_measurement": "µg/m³",
+            "state_class": "measurement",
+        },
+    )
+    add(
+        "sensor",
+        "lux",
+        {
+            "name": "Illuminance",
+            "value_template": "{{ value_json.lux }}",
+            "device_class": "illuminance",
+            "unit_of_measurement": "lx",
+            "state_class": "measurement",
+        },
+    )
+    add(
+        "sensor",
+        "prefilter",
+        {
+            "name": "Pre-filter remaining",
+            "value_template": "{{ value_json.prefilter }}",
+            "unit_of_measurement": "%",
+            "icon": "mdi:air-filter",
+            "state_class": "measurement",
+        },
+    )
+    add(
+        "sensor",
+        "hepa",
+        {
+            "name": "HEPA filter remaining",
+            "value_template": "{{ value_json.hepa }}",
+            "unit_of_measurement": "%",
+            "icon": "mdi:air-filter",
+            "state_class": "measurement",
+        },
+    )
+    diag = {"entity_category": "diagnostic", "entity_registry_enabled_default": False}
+    for r in R.CONTROL_UNKNOWN:
+        k = f"reg_{r:04X}"
+        add("sensor", k, {"name": k, "value_template": f"{{{{ value_json.{k} }}}}", **diag})
+    for r in extra_sensor_regs:
+        k = f"sreg_{r:04X}"
+        add("sensor", k, {"name": k, "value_template": f"{{{{ value_json.{k} }}}}", **diag})
+    return msgs
+
+
+class MqttBridge:
+    def __init__(self, hub: DeviceHub, cfg, base: str = BASE, prefix: str = PREFIX):
+        self.hub, self.cfg, self.base, self.prefix = hub, cfg, base, prefix
+        self._q: asyncio.Queue = asyncio.Queue(maxsize=1000)
+        self._extra: dict[str, set[int]] = {}
+        self._stop = asyncio.Event()
+        self.retry_delay = 5.0
+        self._firmware: dict[str, str | None] = {}
+        hub.add_state_callback(self._on_state)
+        hub.add_online_callback(self._on_online)
+
+    def _put(self, topic: str, payload: str, retain: bool = True) -> None:
+        try:
+            self._q.put_nowait((topic, payload, retain))
+        except asyncio.QueueFull:
+            log.warning("mqtt queue full, dropping %s", topic)
+
+    def _publish_discovery(self, mac: str) -> None:
+        extra = tuple(sorted(self._extra.get(mac, ())))
+        for topic, payload in discovery_messages(
+            mac, self._firmware.get(mac), extra, self.base, self.prefix
+        ):
+            self._put(topic, json.dumps(payload))
+
+    def _on_state(self, mac: str, dev: dict) -> None:
+        extra = {r for r in dev["sensor"] if r not in R.SENSOR_KNOWN}
+        if extra - self._extra.get(mac, set()):
+            self._extra.setdefault(mac, set()).update(extra)
+            self._publish_discovery(mac)
+        self._put(f"{self.base}/{dev_id(mac)}/state", json.dumps(derive_state(dev)))
+
+    def _on_online(self, mac: str, online: bool, firmware: str | None) -> None:
+        if firmware != self._firmware.get(mac) or mac not in self._firmware:
+            self._firmware[mac] = firmware
+            self._publish_discovery(mac)
+        self._put(f"{self.base}/{dev_id(mac)}/online", "online" if online else "offline")
+
+    def _republish_all(self) -> None:
+        for mac in self.hub.macs():
+            dev = self.hub.device_state(mac)
+            self._firmware.setdefault(mac, dev["firmware"])
+            self._publish_discovery(mac)
+            self._put(f"{self.base}/{dev_id(mac)}/state", json.dumps(derive_state(dev)))
+            self._put(f"{self.base}/{dev_id(mac)}/online", "online" if dev["online"] else "offline")
+
+    async def handle_command(self, topic: str, payload: str) -> None:
+        parts = topic.split("/")
+        if len(parts) != 4 or parts[0] != self.base or parts[3] != "set":
+            return
+        mac = next((m for m in self.hub.macs() if dev_id(m) == parts[1]), None)
+        if mac is None:
+            return
+        writes = command_to_writes(parts[2], payload, self.hub.device_state(mac))
+        if not writes:
+            log.warning("ignoring command %s=%r", topic, payload)
+            return
+        await self.hub.write(mac, writes)
+
+    def request_stop(self) -> None:
+        """Ask run() to publish retained offline topics, disconnect cleanly and return."""
+        self._stop.set()
+
+    async def _publish_offline(self, client) -> None:
+        await client.publish(f"{self.base}/status", "offline", retain=True)
+        for mac in self.hub.macs():
+            await client.publish(f"{self.base}/{dev_id(mac)}/online", "offline", retain=True)
+
+    async def _listen(self, client) -> None:
+        async for m in client.messages:
+            await self.handle_command(str(m.topic), m.payload.decode(errors="replace"))
+
+    async def _wait_stop(self) -> None:
+        await self._stop.wait()
+        raise _Stop
+
+    async def run(self) -> None:
+        import aiomqtt
+
+        cfg = self.cfg
+        while not self._stop.is_set():
+            try:
+                tls = ssl.create_default_context() if cfg.mqtt_tls else None
+                async with aiomqtt.Client(
+                    cfg.mqtt_host,
+                    cfg.mqtt_port,
+                    username=cfg.mqtt_username or None,
+                    password=cfg.mqtt_password or None,
+                    tls_context=tls,
+                    will=aiomqtt.Will(f"{self.base}/status", "offline", retain=True),
+                ) as client:
+                    log.info("mqtt connected")
+                    while not self._q.empty():
+                        self._q.get_nowait()
+                    await client.publish(f"{self.base}/status", "online", retain=True)
+                    await client.subscribe(f"{self.base}/+/+/set")
+                    self._republish_all()
+                    stopping = False
+                    try:
+                        async with asyncio.TaskGroup() as tg:
+                            tg.create_task(self._publisher(client))
+                            tg.create_task(self._listen(client))
+                            tg.create_task(self._wait_stop())
+                    except* _Stop:
+                        stopping = True
+                    except* Exception as eg:  # publisher/listener failure: reconnect
+                        log.warning("mqtt session failed: %s; reconnecting", eg.exceptions)
+                    if stopping:
+                        await self._publish_offline(client)  # before the clean disconnect
+                        return
+            except aiomqtt.MqttError as e:
+                log.warning("mqtt error: %s; retrying in %gs", e, self.retry_delay)
+            with contextlib.suppress(TimeoutError):
+                await asyncio.wait_for(self._stop.wait(), self.retry_delay)
+
+    async def _publisher(self, client) -> None:
+        while True:
+            topic, payload, retain = await self._q.get()
+            await client.publish(topic, payload, retain=retain)
+
+
+class _Stop(Exception):
+    pass

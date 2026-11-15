@@ -1,0 +1,41 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "coway-bridge"
+version = "0.1.0"
+description = "Local control bridge for Coway Airmega 400S (AP-2015E) to MQTT / Home Assistant"
+requires-python = ">=3.12"
+dependencies = ["aiohttp>=3.9", "aiomqtt>=2.0", "cryptography>=41"]
+
+[project.optional-dependencies]
+dev = ["pytest", "pytest-xdist", "pytest-asyncio", "ruff"]
+
+[project.scripts]
+coway-setup = "coway_bridge.setup_cli:main"
+coway-bridge = "coway_bridge.__main__:main"
+
+[tool.setuptools]
+package-dir = {"" = "coway_bridge/app"}
+
+[tool.setuptools.package-data]
+coway_bridge = ["static/*"]
+
+[tool.setuptools.packages.find]
+where = ["coway_bridge/app"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+asyncio_mode = "auto"
+asyncio_default_fixture_loop_scope = "function"
+filterwarnings = ["ignore:ssl.TLSVersion.TLSv1 is deprecated:DeprecationWarning"]
+
+[tool.ruff]
+exclude = ["tools/listener.py", "tools/mitm_proxy.py", ".venv"]
+line-length = 100
+target-version = "py312"
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "UP", "B"]
+ignore = ["E501"]
