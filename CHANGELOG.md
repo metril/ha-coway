@@ -1,5 +1,8 @@
 # Changelog
 
+## 0.2.9
+- The HA fan now uses the purifier's real 3 speeds (`speed_range_min` 1, `speed_range_max` 3): HA shows 33 / 67 / 100 % in 3 steps instead of a 1-100 % slider. The bridge publishes and accepts the raw speed 1-3 on the percentage topics (0 = off); `fan.set_percentage` with 33 / 66 / 100 keeps working.
+
 ## 0.2.8
 - Home Assistant values are properly capitalized: fan presets `Smart` / `Bedtime` / `Manual`, Bedtime timer `Off` / `1 hour` / `2 hours` / `4 hours` / `8 hours`, Smart sensitivity `Low` / `Medium` / `High` (matching the web UI). Commands still accept the old lowercase values, but HA itself only offers the new options, so update automations that set a preset, timer or sensitivity by name.
 

@@ -23,7 +23,7 @@ log = logging.getLogger(__name__)
 BASE = "coway_bridge"  # default topic prefix
 NODE = "airmega_400s"
 PREFIX = "homeassistant"
-SPEEDS = {1: 33, 2: 66, 3: 100}
+SPEED_MIN, SPEED_MAX = 1, 3  # HA maps this range to percent (speed_range_min/max)
 # HA-facing labels for the internal (lowercase) values used by registers.writes_for / the web UI
 PRESET_LABELS = {"smart": "Smart", "bedtime": "Bedtime", "manual": "Manual"}
 TIMER_LABELS = {"off": "Off", "1h": "1 hour", "2h": "2 hours", "4h": "4 hours", "8h": "8 hours"}
@@ -47,10 +47,6 @@ def dev_id(mac: str) -> str:
     return mac.lower()
 
 
-def speed_from_percentage(p: int) -> int:
-    return 1 if p <= 33 else 2 if p <= 66 else 3
-
-
 def derive_state(dev: dict, aqi: int | None = None) -> dict:
     """device_state() dict -> flat JSON-able state published to <base>/<mac>/state."""
     c, s = dev.get("control", {}), dev.get("sensor", {})
@@ -58,7 +54,8 @@ def derive_state(dev: dict, aqi: int | None = None) -> dict:
     power = c.get(R.R_POWER)
     if power is not None:
         out["power"] = "ON" if power else "OFF"
-        out["percentage"] = SPEEDS.get(c.get(R.R_SPEED), 0) if power else 0
+        speed = c.get(R.R_SPEED)
+        out["percentage"] = speed if power and SPEED_MIN <= (speed or 0) <= SPEED_MAX else 0
     if R.R_MODE in c:
         out["preset"] = PRESET_LABELS[R.MODE_NAMES.get(c[R.R_MODE], "manual")]
     if R.R_LIGHT in c:
@@ -90,12 +87,12 @@ def command_to_writes(entity: str, payload: str, dev: dict) -> dict[int, int] | 
         return {R.R_POWER: int(p.upper() == "ON")}
     if entity == "percentage":
         try:
-            pct = int(float(p))
+            speed = int(float(p))  # raw fan speed 1-3; HA converts from percent
         except ValueError:
             return None
-        if pct <= 0:
+        if speed <= 0:
             return {R.R_POWER: 0}
-        w = {R.R_SPEED: speed_from_percentage(pct)}
+        w = {R.R_SPEED: min(speed, SPEED_MAX)}
         if not c.get(R.R_POWER):
             w = {R.R_POWER: 1, **w}
         return w
@@ -153,6 +150,8 @@ def discovery_messages(
             "percentage_state_topic": f"{t}/state",
             "percentage_value_template": "{{ value_json.percentage }}",
             "percentage_command_topic": f"{t}/percentage/set",
+            "speed_range_min": SPEED_MIN,
+            "speed_range_max": SPEED_MAX,
             "preset_mode_state_topic": f"{t}/state",
             "preset_mode_value_template": "{{ value_json.preset }}",
             "preset_mode_command_topic": f"{t}/preset/set",

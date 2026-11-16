@@ -16,7 +16,7 @@ DEV = {
 
 def test_derive_state():
     s = m.derive_state(DEV)
-    assert s["power"] == "ON" and s["percentage"] == 66 and s["preset"] == "Manual"
+    assert s["power"] == "ON" and s["percentage"] == 2 and s["preset"] == "Manual"
     assert (s["light"], s["sensitivity"], s["timer"]) == ("ON", "Low", "2 hours")
     assert (s["pm10"], s["light_sensor"], s["pre_filter"], s["max2_filter"]) == (5, 894, 70, 0)
     assert not any(k.startswith(("reg_", "sreg_")) for k in s)
@@ -29,10 +29,11 @@ def test_commands():
     c = m.command_to_writes
     assert c("power", "ON", DEV) == {1: 1} and c("power", "OFF", DEV) == {1: 0}
     assert c("power", "x", DEV) is None
-    assert c("percentage", "33", DEV) == {3: 1}
-    assert c("percentage", "50", DEV) == {3: 2} and c("percentage", "100", DEV) == {3: 3}
-    assert c("percentage", "0", DEV) == {1: 0}
-    assert c("percentage", "66", {"control": {1: 0}}) == {1: 1, 3: 2}
+    assert c("percentage", "1", DEV) == {3: 1}
+    assert c("percentage", "2", DEV) == {3: 2} and c("percentage", "3", DEV) == {3: 3}
+    assert c("percentage", "0", DEV) == {1: 0} and c("percentage", "9", DEV) == {3: 3}
+    assert c("percentage", "2", {"control": {1: 0}}) == {1: 1, 3: 2}
+    assert c("percentage", "x", DEV) is None
     assert c("preset", "smart", DEV) == {2: 1} and c("preset", "bedtime", DEV) == {2: 2}
     assert c("preset", "manual", DEV) == {3: 2} and c("preset", "bogus", DEV) is None
     assert c("light", "ON", DEV) == {7: 2} and c("light", "OFF", DEV) == {7: 0}
@@ -69,6 +70,7 @@ def test_discovery():
     fan = dict(msgs)["homeassistant/fan/airmega_400s_0008dc000001/fan/config"]
     assert fan["name"] is None
     assert all("object_id" not in p for _, p in msgs)
+    assert (fan["speed_range_min"], fan["speed_range_max"]) == (1, 3)
     assert fan["preset_modes"] == ["Smart", "Bedtime", "Manual"]
     d = fan["device"]
     assert (d["manufacturer"], d["model"], d["sw_version"]) == ("Coway", "AP-2015E", "0.0.0.13")

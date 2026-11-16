@@ -236,7 +236,7 @@ async def test_mqtt_bridge_publishes_and_commands(hub):
         topics.append(b._q.get_nowait()[0])
     assert f"coway_bridge/{MAC.lower()}/state" in topics
     assert f"coway_bridge/{MAC.lower()}/online" in topics
-    await b.handle_command(f"coway_bridge/{MAC.lower()}/percentage/set", "100")
+    await b.handle_command(f"coway_bridge/{MAC.lower()}/percentage/set", "3")
     assert (await p.recv_until("A1011QG000100030003")).body.endswith("0003")
 
 
