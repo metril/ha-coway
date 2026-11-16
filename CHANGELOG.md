@@ -1,5 +1,8 @@
 # Changelog
 
+## 0.2.8
+- Home Assistant values are properly capitalized: fan presets `Smart` / `Bedtime` / `Manual`, Bedtime timer `Off` / `1 hour` / `2 hours` / `4 hours` / `8 hours`, Smart sensitivity `Low` / `Medium` / `High` (matching the web UI). Commands still accept the old lowercase values, but HA itself only offers the new options, so update automations that set a preset, timer or sensitivity by name.
+
 ## 0.2.7
 - The purifier light is now a Home Assistant `light` entity (was a `switch`). Update any automations that referenced `switch.airmega_400s_light` to the new `light.` entity.
 

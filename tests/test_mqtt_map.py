@@ -16,12 +16,12 @@ DEV = {
 
 def test_derive_state():
     s = m.derive_state(DEV)
-    assert s["power"] == "ON" and s["percentage"] == 66 and s["preset"] == "manual"
-    assert (s["light"], s["sensitivity"], s["timer"]) == ("ON", "insensitive", "2h")
+    assert s["power"] == "ON" and s["percentage"] == 66 and s["preset"] == "Manual"
+    assert (s["light"], s["sensitivity"], s["timer"]) == ("ON", "Low", "2 hours")
     assert (s["pm10"], s["light_sensor"], s["pre_filter"], s["max2_filter"]) == (5, 894, 70, 0)
     assert not any(k.startswith(("reg_", "sreg_")) for k in s)
     off = m.derive_state({"control": {1: 0, 3: 3, 2: 1}, "sensor": {}})
-    assert off["power"] == "OFF" and off["percentage"] == 0 and off["preset"] == "smart"
+    assert off["power"] == "OFF" and off["percentage"] == 0 and off["preset"] == "Smart"
     assert m.derive_state({"control": {}, "sensor": {}}) == {}
 
 
@@ -69,7 +69,7 @@ def test_discovery():
     fan = dict(msgs)["homeassistant/fan/airmega_400s_0008dc000001/fan/config"]
     assert fan["name"] is None
     assert all("object_id" not in p for _, p in msgs)
-    assert fan["preset_modes"] == ["smart", "bedtime", "manual"]
+    assert fan["preset_modes"] == ["Smart", "Bedtime", "Manual"]
     d = fan["device"]
     assert (d["manufacturer"], d["model"], d["sw_version"]) == ("Coway", "AP-2015E", "0.0.0.13")
     assert d["name"] == "Airmega 400S" and d["identifiers"] == ["airmega_400s_0008dc000001"]
@@ -389,14 +389,14 @@ def test_mode_dependent_availability():
     base = [{"topic": "coway_bridge/status"}, {"topic": f"coway_bridge/{MAC.lower()}/online"}]
     sens = msgs[f"homeassistant/select/airmega_400s_{MAC.lower()}/sensitivity/config"]
     assert sens["name"] == "Smart sensitivity" and sens["availability"] == base
-    assert sens["options"] == ["insensitive", "moderate", "sensitive"]
+    assert sens["options"] == ["Low", "Medium", "High"]
     p = msgs[f"homeassistant/select/airmega_400s_{MAC.lower()}/timer/config"]
     assert p["name"] == "Bedtime timer" and p["availability_mode"] == "all"
     assert p["unique_id"] == f"airmega_400s_{MAC.lower()}_timer"
     a = p["availability"]
     assert a[:2] == base
     assert a[2]["topic"] == f"coway_bridge/{MAC.lower()}/state"
-    assert "value_json.preset == 'bedtime'" in a[2]["value_template"]
+    assert "value_json.preset == 'Bedtime'" in a[2]["value_template"]
     assert "value_json.power == 'ON'" in a[2]["value_template"]
     assert (a[2]["payload_available"], a[2]["payload_not_available"]) == ("online", "offline")
     fan = msgs[f"homeassistant/fan/airmega_400s_{MAC.lower()}/fan/config"]
@@ -408,3 +408,17 @@ def test_light_is_light_platform():
     light = msgs["homeassistant/light/airmega_400s_0008dc000001/light/config"]
     assert light["state_value_template"] == "{{ value_json.light }}"
     assert "value_template" not in light
+
+
+def test_ha_labels_round_trip():
+    c = m.command_to_writes
+    bed = {"control": {1: 1, 2: 2}, "sensor": {}}
+    assert c("preset", "Bedtime", DEV) == {2: 2} and c("preset", "Smart", DEV) == {2: 1}
+    assert c("timer", "8 hours", bed) == {8: 480} and c("timer", "Off", bed) == {8: 0}
+    assert c("timer", "1 hour", bed) == {8: 60} and c("timer", "4h", bed) == {8: 240}
+    assert c("sensitivity", "High", DEV) == {0xA: 1} and c("sensitivity", "Low", DEV) == {0xA: 3}
+    assert c("sensitivity", "moderate", DEV) == {0xA: 2} and c("timer", "3 hours", bed) is None
+    t = dict(m.discovery_messages(MAC))[
+        f"homeassistant/select/airmega_400s_{MAC.lower()}/timer/config"
+    ]
+    assert t["options"] == ["Off", "1 hour", "2 hours", "4 hours", "8 hours"]

@@ -24,8 +24,23 @@ BASE = "coway_bridge"  # default topic prefix
 NODE = "airmega_400s"
 PREFIX = "homeassistant"
 SPEEDS = {1: 33, 2: 66, 3: 100}
-TIMER_OPTIONS = list(R.TIMER.values())
-SENS_OPTIONS = list(R.SENSITIVITY.values())
+# HA-facing labels for the internal (lowercase) values used by registers.writes_for / the web UI
+PRESET_LABELS = {"smart": "Smart", "bedtime": "Bedtime", "manual": "Manual"}
+TIMER_LABELS = {"off": "Off", "1h": "1 hour", "2h": "2 hours", "4h": "4 hours", "8h": "8 hours"}
+SENS_LABELS = {"insensitive": "Low", "moderate": "Medium", "sensitive": "High"}
+LABELS = {"preset": PRESET_LABELS, "timer": TIMER_LABELS, "sensitivity": SENS_LABELS}
+PRESET_OPTIONS = [PRESET_LABELS[p] for p in R.PRESETS]
+TIMER_OPTIONS = [TIMER_LABELS[v] for v in R.TIMER.values()]
+SENS_OPTIONS = [SENS_LABELS[v] for v in R.SENSITIVITY.values()]
+
+
+def from_label(entity: str, value: str) -> str:
+    """HA label (or internal value, any case) -> internal value; unknown passes through."""
+    v = value.strip().lower()
+    for internal, label in LABELS[entity].items():
+        if v in (internal, label.lower()):
+            return internal
+    return value
 
 
 def dev_id(mac: str) -> str:
@@ -45,13 +60,13 @@ def derive_state(dev: dict, aqi: int | None = None) -> dict:
         out["power"] = "ON" if power else "OFF"
         out["percentage"] = SPEEDS.get(c.get(R.R_SPEED), 0) if power else 0
     if R.R_MODE in c:
-        out["preset"] = R.MODE_NAMES.get(c[R.R_MODE], "manual")
+        out["preset"] = PRESET_LABELS[R.MODE_NAMES.get(c[R.R_MODE], "manual")]
     if R.R_LIGHT in c:
         out["light"] = "ON" if c[R.R_LIGHT] == R.LIGHT_ON else "OFF"
     if c.get(R.R_SENS) in R.SENSITIVITY:
-        out["sensitivity"] = R.SENSITIVITY[c[R.R_SENS]]
+        out["sensitivity"] = SENS_LABELS[R.SENSITIVITY[c[R.R_SENS]]]
     if c.get(R.R_TIMER) in R.TIMER:
-        out["timer"] = R.TIMER[c[R.R_TIMER]]
+        out["timer"] = TIMER_LABELS[R.TIMER[c[R.R_TIMER]]]
     if R.S_PM10 in s:
         out["pm10"] = s[R.S_PM10]
     if aqi is not None:
@@ -85,7 +100,7 @@ def command_to_writes(entity: str, payload: str, dev: dict) -> dict[int, int] | 
             w = {R.R_POWER: 1, **w}
         return w
     if entity in ("preset", "timer", "sensitivity"):
-        return R.writes_for(entity, p, c)
+        return R.writes_for(entity, from_label(entity, p), c)
     if entity == "light":
         if p.upper() not in ("ON", "OFF"):
             return None
@@ -141,7 +156,7 @@ def discovery_messages(
             "preset_mode_state_topic": f"{t}/state",
             "preset_mode_value_template": "{{ value_json.preset }}",
             "preset_mode_command_topic": f"{t}/preset/set",
-            "preset_modes": list(R.PRESETS),
+            "preset_modes": PRESET_OPTIONS,
         },
     )
     add(
@@ -163,7 +178,7 @@ def discovery_messages(
                     "topic": f"{t}/state",
                     "value_template": (
                         "{{ 'online' if value_json.power == 'ON' "
-                        "and value_json.preset == 'bedtime' else 'offline' }}"
+                        "and value_json.preset == 'Bedtime' else 'offline' }}"
                     ),
                     "payload_available": "online",
                     "payload_not_available": "offline",
